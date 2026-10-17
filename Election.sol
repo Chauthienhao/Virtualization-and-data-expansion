@@ -27,10 +27,15 @@ contract Election {
     mapping(uint => Candidate) public candidates;
     uint public candidatesCount;
 
+    // 3b. Hàng đợi yêu cầu xác thực cử tri (cử tri tự gửi, Admin duyệt/từ chối)
+    mapping(address => bool) public hasRequested; // true = đang chờ Admin duyệt
+    address[] public pendingRequests; // nhật ký mọi địa chỉ từng gửi yêu cầu
+
     // 4. Các sự kiện (Events) để Frontend (ReactJS) lắng nghe
     event VotedEvent(address indexed _voter, uint _candidateId);
     event ElectionStarted();
     event ElectionEnded();
+    event AuthorizationRequested(address indexed _voter);
 
     // 5. Bộ lọc quyền (Modifier)
     modifier onlyAdmin() {
@@ -53,9 +58,20 @@ contract Election {
         candidates[candidatesCount] = Candidate(candidatesCount, _name, 0);
     }
 
+    // LƯU Ý: KHÔNG còn require(!electionActive) ở đây như bản trước. Trong
+    // kiến trúc ví custodial (xem voter_api.py), một cử tri có thể đăng
+    // nhập LẦN ĐẦU TIÊN vào bất kỳ lúc nào trong suốt thời gian mở cuộc bầu
+    // cử — không phải ai cũng đăng nhập trước khi Admin bấm "Bắt đầu". Nếu
+    // giữ require này, bất kỳ ai đăng nhập lần đầu SAU khi bầu cử đã mở sẽ
+    // không bao giờ cấp quyền được, bị khóa ngoài vĩnh viễn.
     function authorizeVoter(address _voter) public onlyAdmin {
-        require(!electionActive, "Chi cap quyen truoc khi bau cu dien ra");
         voters[_voter].isAuthorized = true;
+        hasRequested[_voter] = false; // duyệt xong thì không còn "đang chờ" nữa
+    }
+
+    // Admin từ chối một yêu cầu: gỡ khỏi hàng đợi "đang chờ", KHÔNG cấp quyền.
+    function rejectVoterRequest(address _voter) public onlyAdmin {
+        hasRequested[_voter] = false;
     }
 
     function startElection() public onlyAdmin {
@@ -71,6 +87,22 @@ contract Election {
     // ==========================================
     // HÀM DÀNH CHO CỬ TRI (GỌI TỪ REACTJS + METAMASK)
     // ==========================================
+
+    // Cử tri tự gửi yêu cầu xin cấp quyền bầu cử — KHÔNG tự động được cấp
+    // quyền, chỉ được thêm vào hàng đợi để Admin xem và quyết định duyệt
+    // hay từ chối (qua authorizeVoter/rejectVoterRequest ở trên).
+    function requestToVote() public {
+        require(!electionActive, "Chi gui yeu cau truoc khi bau cu dien ra");
+        require(!voters[msg.sender].isAuthorized, "Dia chi vi nay da duoc cap quyen roi");
+        require(!hasRequested[msg.sender], "Ban da gui yeu cau truoc do, vui long cho Admin duyet");
+        hasRequested[msg.sender] = true;
+        pendingRequests.push(msg.sender);
+        emit AuthorizationRequested(msg.sender);
+    }
+
+    function getPendingRequestsCount() public view returns (uint) {
+        return pendingRequests.length;
+    }
 
     function vote(uint _candidateId) public {
         // Kiểm tra các điều kiện tiên quyết

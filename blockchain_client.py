@@ -24,7 +24,7 @@ import json
 from pathlib import Path
 
 from web3 import Web3
-from web3.exceptions import ContractLogicError, TimeExhausted
+from web3.exceptions import BadFunctionCallOutput, ContractLogicError, TimeExhausted
 
 try:
     from dotenv import load_dotenv
@@ -39,6 +39,20 @@ class ElectionError(Exception):
     """Lỗi nghiệp vụ/kết nối đã được diễn giải sang tiếng Việt dễ hiểu,
     để lớp giao diện (Gradio) chỉ cần hiển thị str(e) cho người dùng."""
     pass
+
+
+class ContractNotFoundError(ElectionError):
+    """Tại CONTRACT_ADDRESS không có hợp đồng nào (bytecode rỗng). Thường do
+    Ganache vừa bị restart/đổi workspace (chain bị reset) hoặc vừa deploy lại
+    sang địa chỉ mới trong khi server vẫn giữ địa chỉ cũ. Tách riêng lớp lỗi
+    này để voter_api.py/adminUI.py nhận ra và tự tạo lại client (đọc lại .env)."""
+    pass
+
+
+def _contract_not_found_message(address: str, rpc_url: str) -> str:
+    return (f"Không tìm thấy hợp đồng Election tại {address} trên {rpc_url}. "
+            f"Có thể Ganache vừa được khởi động lại (chain bị reset) hoặc hợp đồng đã được "
+            f"deploy lại sang địa chỉ khác. Hãy chạy lại deploy.py rồi cập nhật CONTRACT_ADDRESS trong .env.")
 
 
 # Các thông báo require() trong Election.sol, dùng để dịch lỗi revert
@@ -60,6 +74,12 @@ _REVERT_MESSAGES = {
         "Cử tri này đã bầu rồi, không thể bầu lần hai.",
     "ID Ung vien khong hop le":
         "Mã ứng viên không hợp lệ.",
+    "Chi gui yeu cau truoc khi bau cu dien ra":
+        "Cử tri chỉ có thể gửi yêu cầu xác thực TRƯỚC khi cuộc bầu cử bắt đầu.",
+    "Dia chi vi nay da duoc cap quyen roi":
+        "Địa chỉ ví này đã được cấp quyền rồi, không cần gửi yêu cầu nữa.",
+    "Ban da gui yeu cau truoc do, vui long cho Admin duyet":
+        "Địa chỉ ví này đã gửi yêu cầu trước đó, đang chờ Admin duyệt.",
 }
 
 
@@ -91,6 +111,13 @@ def _humanize_error(exc: Exception, rpc_url: str = "") -> str:
 class ElectionClient:
     def __init__(self, rpc_url=None, contract_address=None, abi_path=None,
                  private_key=None, account_index=None):
+        # Đọc lại .env mỗi lần tạo client (override=True) để khi tạo lại client
+        # sau khi deploy lại/sửa .env thì nhận đúng giá trị mới, không phải
+        # khởi động lại cả server.
+        try:
+            load_dotenv(override=True)
+        except NameError:
+            pass  # chưa cài python-dotenv
         self.rpc_url = rpc_url or os.getenv("RPC_URL", "http://127.0.0.1:7545")
         self.contract_address = contract_address or os.getenv("CONTRACT_ADDRESS", "")
         abi_path = abi_path or os.getenv("ABI_PATH", "ElectionABI.json")
@@ -127,6 +154,15 @@ class ElectionClient:
         except ValueError:
             raise ElectionError(f"CONTRACT_ADDRESS trong .env không đúng định dạng: {self.contract_address}")
 
+        # Kiểm tra tại địa chỉ này THỰC SỰ có hợp đồng, để báo lỗi rõ ngay lúc
+        # khởi tạo thay vì đợi tới lời gọi đầu tiên mới nổ BadFunctionCallOutput.
+        try:
+            code = self.w3.eth.get_code(self.contract_address)
+        except Exception as e:
+            raise ElectionError(_humanize_error(e, self.rpc_url))
+        if not code:
+            raise ContractNotFoundError(_contract_not_found_message(self.contract_address, self.rpc_url))
+
         self.contract = self.w3.eth.contract(address=self.contract_address, abi=self.abi)
 
         # --- Xác định tài khoản Admin sẽ dùng để ký giao dịch ---
@@ -146,6 +182,15 @@ class ElectionClient:
     # NỘI BỘ: gửi giao dịch ghi (transaction), kèm mô phỏng trước để bắt
     # lỗi revert sớm (không tốn gas) và dịch lỗi sang tiếng Việt.
     def _send(self, fn):
+        # Gửi giao dịch tới địa chỉ không có hợp đồng vẫn "thành công" (status=1)
+        # mà không làm gì cả, nên phải chặn trước.
+        try:
+            has_code = bool(self.w3.eth.get_code(self.contract_address))
+        except Exception as e:
+            raise ElectionError(_humanize_error(e, self.rpc_url))
+        if not has_code:
+            raise ContractNotFoundError(_contract_not_found_message(self.contract_address, self.rpc_url))
+
         try:
             fn.call({"from": self.account})  # mô phỏng trước, bắt lỗi require()
         except ContractLogicError as e:
@@ -181,21 +226,51 @@ class ElectionClient:
         except Exception as e:
             raise ElectionError(_humanize_error(e, self.rpc_url))
 
+    # NỘI BỘ: thực hiện lời gọi đọc (call), dịch lỗi sang ElectionError để
+    # lớp trên chỉ cần bắt một loại exception.
+    def _call(self, fn):
+        try:
+            return fn.call()
+        except BadFunctionCallOutput:
+            # Gọi trả về rỗng: phân biệt "không có hợp đồng" với "ABI lệch bytecode".
+            try:
+                has_code = bool(self.w3.eth.get_code(self.contract_address))
+            except Exception as e:
+                raise ElectionError(_humanize_error(e, self.rpc_url))
+            if not has_code:
+                raise ContractNotFoundError(_contract_not_found_message(self.contract_address, self.rpc_url))
+            raise ElectionError(
+                f"Hợp đồng tại {self.contract_address} không có hàm {fn.fn_name}() như trong ElectionABI.json. "
+                f"Có thể ABI không khớp với bản Election.sol đã deploy — hãy chạy lại deploy.py."
+            )
+        except ElectionError:
+            raise
+        except Exception as e:
+            raise ElectionError(_humanize_error(e, self.rpc_url))
+
     # CÁC HÀM ĐỌC (READ) - không tốn gas, không cần ký
+    def is_contract_deployed(self) -> bool:
+        """True nếu node vẫn kết nối được VÀ tại contract_address vẫn có hợp
+        đồng. Dùng để phát hiện client đã "cũ" (Ganache restart, deploy lại)."""
+        try:
+            return bool(self.w3.eth.get_code(self.contract_address))
+        except Exception:
+            return False
+
     def get_admin_address(self) -> str:
-        return self.contract.functions.admin().call()
+        return self._call(self.contract.functions.admin())
 
     def is_configured_account_admin(self) -> bool:
         return self.get_admin_address().lower() == self.account.lower()
 
     def get_election_active(self) -> bool:
-        return self.contract.functions.electionActive().call()
+        return self._call(self.contract.functions.electionActive())
 
     def get_candidates_count(self) -> int:
-        return self.contract.functions.candidatesCount().call()
+        return self._call(self.contract.functions.candidatesCount())
 
     def get_candidate(self, candidate_id: int) -> dict:
-        cid, name, votes = self.contract.functions.candidates(candidate_id).call()
+        cid, name, votes = self._call(self.contract.functions.candidates(candidate_id))
         return {"id": cid, "name": name, "votes": votes}
 
     def get_all_candidates(self) -> list:
@@ -204,13 +279,36 @@ class ElectionClient:
 
     def get_voter(self, address: str) -> dict:
         address = self._checksum(address)
-        is_authorized, has_voted, voted_candidate_id = self.contract.functions.voters(address).call()
+        is_authorized, has_voted, voted_candidate_id = self._call(self.contract.functions.voters(address))
         return {
             "address": address,
             "is_authorized": is_authorized,
             "has_voted": has_voted,
             "voted_candidate_id": voted_candidate_id,
         }
+
+    def get_pending_requests(self) -> list:
+        """Trả về danh sách địa chỉ ví ĐANG chờ Admin duyệt (đã gửi
+        requestToVote() nhưng chưa được authorizeVoter/rejectVoterRequest
+        xử lý). pendingRequests trên chain là một mảng chỉ-thêm-vào (không
+        tự xóa phần tử cũ để tiết kiệm gas), nên phải lọc lại bằng
+        hasRequested(addr) để biết cái nào THẬT SỰ còn đang chờ."""
+        count = self._call(self.contract.functions.getPendingRequestsCount())
+        result = []
+        seen = set()
+        for i in range(count):
+            addr = self._call(self.contract.functions.pendingRequests(i))
+            if addr in seen:
+                continue  # phòng trường hợp lý thuyết trùng địa chỉ trong mảng
+            seen.add(addr)
+            if self._call(self.contract.functions.hasRequested(addr)):
+                result.append(addr)
+        return result
+
+    def reject_voter_request(self, address: str) -> dict:
+        address = self._checksum(address)
+        self._send(self.contract.functions.rejectVoterRequest(address))
+        return {"address": address}
 
     def _checksum(self, address: str) -> str:
         try:
@@ -239,3 +337,10 @@ class ElectionClient:
 
     def end_election(self) -> None:
         self._send(self.contract.functions.endElection())
+
+    def vote(self, candidate_id: int) -> None:
+        """Bầu cho một ứng viên. KHÔNG có modifier onlyAdmin trong Solidity —
+        dùng được bởi mọi tài khoản. Trong voter_api.py, hàm này được gọi
+        trên một ElectionClient KHÁC (khởi tạo bằng private_key của cử tri,
+        không phải của Admin), để giao dịch được ký đúng danh nghĩa cử tri."""
+        self._send(self.contract.functions.vote(candidate_id))

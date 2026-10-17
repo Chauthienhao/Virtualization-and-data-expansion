@@ -17,18 +17,15 @@ export default function Landing({ onNavigate }) {
         <div className="w-full md:w-1/2 text-center md:text-left flex flex-col items-center md:items-start space-y-6">
           <h1 className="text-5xl md:text-6xl font-bold tracking-wider">BLOCK-VOTE</h1>
           <p className="text-xl tracking-wide font-light text-cyan-100">HÃY THAM GIA BẦU CỬ</p>
-          <div className="flex flex-col sm:flex-row gap-4 pt-4 w-full max-w-md">
+          {/* Admin không đăng nhập ở app React này — Admin thao tác qua một
+              ứng dụng Python/Gradio riêng (adminUI.py). Cử tri xác thực
+              bằng CCCD + mã truy cập, không cần biết gì về ví/blockchain. */}
+          <div className="flex pt-4 w-full max-w-md">
             <button
               onClick={() => onNavigate("login")}
               className="flex-1 border-2 border-white/80 bg-white/20 hover:bg-white hover:text-[#38c8e6] text-white py-3 px-6 rounded-full font-bold transition-all shadow-md"
             >
-              NGƯỜI DÙNG ĐĂNG KÝ/ĐĂNG NHẬP
-            </button>
-            <button
-              onClick={() => onNavigate("login")}
-              className="flex-1 border-2 border-white/80 bg-white/20 hover:bg-white hover:text-[#38c8e6] text-white py-3 px-6 rounded-full font-bold transition-all shadow-md"
-            >
-              QUẢN TRỊ VIÊN ĐĂNG NHẬP
+              BẮT ĐẦU BẦU CỬ
             </button>
           </div>
         </div>

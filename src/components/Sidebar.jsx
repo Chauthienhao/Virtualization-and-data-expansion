@@ -1,5 +1,5 @@
 import React from "react";
-import { ClipboardList, CheckSquare, Vote, BarChart3, LogOut } from "lucide-react";
+import { ClipboardList, SquareCheck, Vote, ChartColumn, LogOut } from "lucide-react";
 
 export default function Sidebar({ activeTab, onSelectTab, onLogout }) {
   return (
@@ -16,16 +16,16 @@ export default function Sidebar({ activeTab, onSelectTab, onLogout }) {
             }`}
           >
             <ClipboardList className="w-5 h-5 mr-3" />
-            Information
+            Hướng Dẫn
           </button>
           <button
-            onClick={() => onSelectTab("register")}
+            onClick={() => onSelectTab("account")}
             className={`w-full flex items-center px-6 py-4 text-left font-medium transition-all ${
-              activeTab === "register" ? "bg-[#38c8e6] text-white shadow-sm" : "text-gray-600 hover:bg-gray-50"
+              activeTab === "account" ? "bg-[#38c8e6] text-white shadow-sm" : "text-gray-600 hover:bg-gray-50"
             }`}
           >
-            <CheckSquare className="w-5 h-5 mr-3" />
-            Voter Registration
+            <SquareCheck className="w-5 h-5 mr-3" />
+            Tài Khoản
           </button>
           <button
             onClick={() => onSelectTab("voting")}
@@ -34,16 +34,16 @@ export default function Sidebar({ activeTab, onSelectTab, onLogout }) {
             }`}
           >
             <Vote className="w-5 h-5 mr-3" />
-            Voting-Area
+            Bỏ Phiếu
           </button>
           <button
-            onClick={() => onSelectTab("result")}
+            onClick={() => onSelectTab("myvote")}
             className={`w-full flex items-center px-6 py-4 text-left font-medium transition-all ${
-              activeTab === "result" ? "bg-[#38c8e6] text-white shadow-sm" : "text-gray-600 hover:bg-gray-50"
+              activeTab === "myvote" ? "bg-[#38c8e6] text-white shadow-sm" : "text-gray-600 hover:bg-gray-50"
             }`}
           >
-            <BarChart3 className="w-5 h-5 mr-3" />
-            Result
+            <ChartColumn className="w-5 h-5 mr-3" />
+            Phiếu Của Tôi
           </button>
         </nav>
       </div>
@@ -53,7 +53,7 @@ export default function Sidebar({ activeTab, onSelectTab, onLogout }) {
           className="w-full flex items-center px-4 py-3 text-gray-600 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all font-medium"
         >
           <LogOut className="w-5 h-5 mr-3" />
-          LogOut
+          Đăng Xuất
         </button>
       </div>
     </aside>
