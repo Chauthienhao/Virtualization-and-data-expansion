@@ -115,6 +115,22 @@ class SessionRequest(BaseModel):
 # HELPER NỘI BỘ
 # ==============================================================================
 
+def _current_candidates() -> list:
+    """Ứng viên của cuộc bầu cử MỚI NHẤT (trên contract đang kết nối) — KHÔNG
+    phải toàn bộ ứng viên trên chain: contract dùng chung cho nhiều đợt bầu
+    nên candidatesCount còn chứa cả ứng viên của các đợt trước."""
+    try:
+        item = storage.get_election(storage.get_latest_election_code() or "")
+    except StorageError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    if item is None or item["contract_address"].lower() != client.contract_address.lower():
+        return []
+    try:
+        return [client.get_candidate(cid) for cid in item["candidate_ids"]]
+    except ElectionError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _get_session_voter(session_token: str) -> dict:
     try:
         voter = storage.get_voter_by_session(session_token)
@@ -208,8 +224,8 @@ def me(session_token: str):
     phiếu — xem lưu ý ở đầu file về việc không công bố kết quả cho cử tri)."""
     _require_client()
     voter = _get_session_voter(session_token)
+    candidates = _current_candidates()
     try:
-        candidates = client.get_all_candidates()
         election_active = client.get_election_active()
         voter_chain = client.get_voter(voter["wallet_address"])
     except ElectionError as e:
@@ -233,6 +249,11 @@ def vote(req: VoteRequest):
 
     if voter["encrypted_private_key"] is None:
         raise HTTPException(status_code=409, detail="Bạn đã bỏ phiếu rồi, không thể bầu lần hai.")
+
+    # Contract chấp nhận mọi id <= candidatesCount (kể cả ứng viên của đợt cũ),
+    # nên phải tự chặn ở đây: chỉ được bầu ứng viên của cuộc bầu cử hiện tại.
+    if req.candidate_id not in {c["id"] for c in _current_candidates()}:
+        raise HTTPException(status_code=400, detail="Ứng viên này không thuộc cuộc bầu cử hiện tại.")
 
     try:
         private_key = voter_accounts.decrypt_private_key(voter["encrypted_private_key"])

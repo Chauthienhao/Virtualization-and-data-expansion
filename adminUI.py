@@ -1,5 +1,8 @@
+import html
+
 import gradio as gr
 import pandas as pd
+import plotly.graph_objects as go
 
 from blockchain_client import ElectionClient, ElectionError
 import storage
@@ -57,7 +60,7 @@ draft_candidates = []            # Danh sách ứng viên đang soạn thảo, C
 ELECTION_COLS = ["Mã Phiên", "Tên Cuộc Bầu Cử", "Số Ứng Viên", "Thời Gian Bắt Đầu", "Thời Gian Kết Thúc", "Trạng Thái"]
 CANDIDATE_COLS = ["Mã SBD (dự kiến)", "Họ Và Tên", "Đơn Vị / Chi Đoàn"]
 CANDIDATE_RESULT_COLS = ["Mã SBD", "Họ Và Tên", "Đơn Vị / Chi Đoàn", "Số Phiếu Bầu"]
-RESULTS_COLS = ["Mã SBD", "Tên Ứng Viên", "Đơn Vị", "Số Phiếu Bầu"]
+RESULTS_COLS = ["Mã SBD", "Tên Ứng Viên", "Đơn Vị", "Số Phiếu Bầu", "Tỉ Lệ"]
 # Mã SBD (UV-01, UV-02, ...) do storage cấp từ bộ đếm AUTO_INCREMENT của MySQL,
 # không dùng ID on-chain — deploy lại contract thì ID on-chain đếm lại từ 1.
 
@@ -92,10 +95,10 @@ def _require_storage():
 # ---------- TAB 1: DASHBOARD ----------
 
 def on_check_connection():
-    """Kiểm tra/làm mới trạng thái kết nối blockchain VÀ MySQL."""
+    """Kiểm tra/làm mới trạng thái kết nối blockchain VÀ MySQL, rồi vẽ lại
+    Dashboard của cuộc bầu cử mới nhất."""
     init_client()
     init_storage()
-    empty_cols = RESULTS_COLS
 
     lines = []
     if client is None:
@@ -119,36 +122,178 @@ def on_check_connection():
     lines.append(storage.check_connection() if storage_error is None else f"MySQL: {storage_error}")
 
     status = "\n\n".join(lines)
-    results = pd.DataFrame(columns=empty_cols)
-    if client is not None:
-        try:
-            results = _build_results_table()
-        except ElectionError as e:
-            status += f"\n\nKhông đọc được kết quả trên chain: {e}"
-    return status, results
+    return (status, *_render_dashboard())
 
 
-def _build_results_table():
-    """Đọc toàn bộ ứng viên + số phiếu trực tiếp từ chain, ghép với metadata off-chain.
-    Nếu MySQL đang lỗi, vẫn hiển thị đúng dữ liệu trên chain (chỉ để trống Đơn vị),
-    vì đây là hai nguồn dữ liệu độc lập — chain hỏng hay MySQL hỏng không nên kéo nhau."""
-    cols = RESULTS_COLS
-    candidates = client.get_all_candidates()
+def on_dashboard_tick():
+    """Gọi bởi gr.Timer mỗi DASHBOARD_REFRESH_SECONDS giây: chỉ vẽ lại khi
+    phiên mới nhất ĐANG DIỄN RA (số phiếu mới thay đổi được), còn lại bỏ qua
+    để không đọc chain/vẽ lại vô ích."""
+    if client is None or storage_error is not None:
+        return gr.skip(), gr.skip(), gr.skip()
     try:
-        meta_map = storage.get_candidate_meta_bulk(client.contract_address, [c["id"] for c in candidates])
+        latest = storage.get_election(storage.get_latest_election_code() or "")
+    except StorageError:
+        return gr.skip(), gr.skip(), gr.skip()
+    if not latest or latest["status"] != STATUS_RUNNING:
+        return gr.skip(), gr.skip(), gr.skip()
+    return _render_dashboard()
+
+
+DASHBOARD_REFRESH_SECONDS = 10
+
+# Màu biểu đồ (bảng màu tham chiếu của skill dataviz): một chuỗi dữ liệu duy
+# nhất nên chỉ dùng MỘT tông xanh — người dẫn đầu đậm, còn lại nhạt hơn cùng tông.
+# Chữ dùng xám trung tính (đọc được trên cả nền sáng lẫn tối), không dùng màu cột.
+CHART_LEADER = "#2a78d6"
+CHART_OTHER = "#86b6ef"
+CHART_INK = "#898781"
+CHART_GRID = "rgba(137,135,129,0.25)"
+
+STATUS_DOT = {  # trạng thái luôn đi kèm chữ, màu chỉ là chấm phụ trợ
+    "Đang diễn ra": "#0ca30c",
+    "Tạm dừng": "#fab219",
+    "Đã kết thúc": "#898781",
+}
+
+
+def _latest_election_results():
+    """Phiên mới nhất + số phiếu từng ứng viên của phiên đó (đọc từ chain).
+    Trả về (item, rows) hoặc (None, thông báo lỗi). rows đã sắp giảm dần theo
+    số phiếu. Nếu MySQL lỗi giữa chừng, vẫn hiện số phiếu (chỉ thiếu SBD/đơn vị)."""
+    err = _require_storage() or _require_client()
+    if err:
+        return None, err
+    try:
+        item = storage.get_election(storage.get_latest_election_code() or "")
+    except StorageError as e:
+        return None, f"{e}"
+    if item is None:
+        return None, "Chưa có cuộc bầu cử nào. Hãy tạo phiên ở Tab 2."
+    if not _same_contract(item):
+        return None, (f"Phiên mới nhất ({item['id']}) thuộc một contract cũ, không phải contract "
+                      f"đang kết nối. Hãy tạo phiên mới ở Tab 2.")
+    if not item["candidate_ids"]:
+        return None, f"Phiên {item['id']} chưa có ứng viên nào trên chain."
+
+    try:
+        meta_map = storage.get_candidate_meta_bulk(client.contract_address, item["candidate_ids"])
     except StorageError:
         meta_map = {}
 
     rows = []
-    for cand in candidates:
-        meta = meta_map.get(cand["id"], {"code": "", "unit": ""})
-        rows.append({
-            "Mã SBD": meta["code"],
-            "Tên Ứng Viên": cand["name"],
-            "Đơn Vị": meta["unit"],
-            "Số Phiếu Bầu": cand["votes"],
-        })
-    return pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
+    for cid in item["candidate_ids"]:
+        try:
+            cand = client.get_candidate(cid)
+        except ElectionError as e:
+            return None, f"Không đọc được ứng viên #{cid} từ chain: {e}"
+        meta = meta_map.get(cid, {"code": "", "unit": ""})
+        rows.append({"code": meta["code"], "name": cand["name"], "unit": meta["unit"], "votes": cand["votes"]})
+    rows.sort(key=lambda r: r["votes"], reverse=True)
+    return item, rows
+
+
+def _render_dashboard():
+    """Trả về (HTML phần đầu + ô số liệu, biểu đồ Plotly, bảng chi tiết)."""
+    item, rows = _latest_election_results()
+    if item is None:
+        notice = f"<div style='padding:12px 0;color:var(--body-text-color-subdued)'>{html.escape(rows)}</div>"
+        return notice, None, pd.DataFrame(columns=RESULTS_COLS)
+
+    total = sum(r["votes"] for r in rows)
+    top = rows[0]["votes"]
+    leaders = [r for r in rows if r["votes"] == top] if total > 0 else []
+    for r in rows:
+        r["pct"] = (r["votes"] / total * 100) if total else 0.0
+
+    return _dashboard_header_html(item, rows, total, leaders), _results_chart(rows, leaders), pd.DataFrame(
+        [{
+            "Mã SBD": r["code"],
+            "Tên Ứng Viên": r["name"],
+            "Đơn Vị": r["unit"],
+            "Số Phiếu Bầu": r["votes"],
+            "Tỉ Lệ": f"{r['pct']:.1f}%",
+        } for r in rows],
+        columns=RESULTS_COLS,
+    )
+
+
+def _dashboard_header_html(item, rows, total, leaders):
+    esc = html.escape
+    status = item["status"]
+    dot = STATUS_DOT.get(status, "#898781")
+
+    if not leaders:
+        leader_text = "Chưa có phiếu"
+    elif len(leaders) == 1:
+        leader_text = f"{esc(leaders[0]['name'])} ({leaders[0]['votes']} – {leaders[0]['pct']:.1f}%)"
+    else:
+        leader_text = "Đồng hạng: " + ", ".join(esc(r["name"]) for r in leaders) + f" ({leaders[0]['votes']} phiếu)"
+
+    def tile(label, value):
+        return (
+            "<div style='flex:1 1 180px;padding:14px 16px;border-radius:8px;"
+            "background:var(--block-background-fill);border:1px solid var(--border-color-primary)'>"
+            f"<div style='font-size:13px;color:var(--body-text-color-subdued)'>{label}</div>"
+            f"<div style='font-size:24px;font-weight:600;color:var(--body-text-color);margin-top:4px'>{value}</div>"
+            "</div>"
+        )
+
+    return (
+        "<div style='display:flex;flex-direction:column;gap:12px'>"
+        "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:10px'>"
+        f"<span style='font-size:20px;font-weight:600;color:var(--body-text-color)'>"
+        f"{esc(item['id'])} · {esc(item['title'])}</span>"
+        "<span style='display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;"
+        "border:1px solid var(--border-color-primary);font-size:13px;color:var(--body-text-color)'>"
+        f"<span style='width:8px;height:8px;border-radius:50%;background:{dot}'></span>{esc(status)}</span>"
+        "</div>"
+        "<div style='font-size:13px;color:var(--body-text-color-subdued)'>"
+        f"Bắt đầu: {esc(item['start'] or 'Chưa bắt đầu')} &nbsp;·&nbsp; "
+        f"Kết thúc: {esc(item['end'] or 'Chưa kết thúc')}</div>"
+        "<div style='display:flex;flex-wrap:wrap;gap:12px'>"
+        + tile("Tổng phiếu", f"{total:,}")
+        + tile("Số ứng viên", f"{len(rows)}")
+        + tile("Dẫn đầu", leader_text)
+        + "</div></div>"
+    )
+
+
+def _results_chart(rows, leaders):
+    """Biểu đồ cột ngang, xếp từ cao xuống thấp; số phiếu + % ghi ở cuối mỗi cột."""
+    leader_names = {id(r) for r in leaders}
+    labels = [f"{r['code']} · {r['name']}" if r["code"] else r["name"] for r in rows]
+    max_votes = max((r["votes"] for r in rows), default=0)
+
+    fig = go.Figure(go.Bar(
+        x=[r["votes"] for r in rows],
+        y=labels,
+        orientation="h",
+        marker=dict(color=[CHART_LEADER if id(r) in leader_names else CHART_OTHER for r in rows],
+                    cornerradius=4, line=dict(width=0)),
+        text=[f"{r['votes']} ({r['pct']:.1f}%)" for r in rows],
+        textposition="outside",
+        textfont=dict(color=CHART_INK, size=13),
+        cliponaxis=False,
+        customdata=[[r["name"], r["code"] or "—", r["unit"] or "—", f"{r['pct']:.1f}%"] for r in rows],
+        hovertemplate=("<b>%{customdata[0]}</b><br>Mã SBD: %{customdata[1]}<br>"
+                       "Đơn vị: %{customdata[2]}<br>Số phiếu: %{x} (%{customdata[3]})<extra></extra>"),
+    ))
+    fig.update_layout(
+        height=80 + 44 * len(rows),          # mỗi ứng viên một dải 44px, cột dày ~24px
+        bargap=0.45,
+        margin=dict(l=8, r=24, t=16, b=16),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family='system-ui, -apple-system, "Segoe UI", sans-serif', color=CHART_INK, size=13),
+        showlegend=False,
+        hoverlabel=dict(font_size=13),
+        # Mọi cột đều có nhãn số ở cuối nên ẩn trục X + lưới, chỉ giữ đường gốc 0.
+        xaxis=dict(range=[0, max(1, max_votes) * 1.25], showticklabels=False, showgrid=False,
+                   zeroline=True, zerolinecolor=CHART_GRID, zerolinewidth=1, fixedrange=True),
+        yaxis=dict(autorange="reversed", automargin=True, showgrid=False, ticksuffix="   ", fixedrange=True),
+    )
+    return fig
 
 
 # ---------- TAB 2: THÊM CUỘC BẦU CỬ & ỨNG VIÊN ----------
@@ -443,6 +588,12 @@ def on_update_election_status(election_id, new_status):
         storage.update_election_status(election_id, new_db_status)
         if time_field:
             storage.set_election_time(election_id, time_field)
+        if new_db_status == STATUS_ENDED:
+            # Danh sách cử tri chỉ dùng cho 1 cuộc bầu cử; kết quả đã nằm trên
+            # chain nên xóa luôn (kèm ví/private key) sau khi chốt sổ, và đưa
+            # bộ đếm ID về 1 cho danh sách của cuộc bầu cử sau.
+            deleted = storage.reset_voters()
+            result_msg += f"\nĐã xóa {deleted} cử tri khỏi danh sách (danh sách chỉ dùng cho phiên này)."
     except StorageError as e:
         result_msg += f"\n⚠️ (Giao dịch chain đã thành công nhưng lỗi khi cập nhật trạng thái trong MySQL: {e})"
 
@@ -534,6 +685,47 @@ def on_bulk_add_voters(bulk_text):
     return _get_voters_table(), msg
 
 
+def on_delete_all_voters(confirmed):
+    """Xóa thủ công toàn bộ danh sách cử tri (ví dụ dọn danh sách cũ còn tồn
+    đọng). Chặn khi đang có phiên diễn ra/tạm dừng để không đá cử tri ra giữa chừng.
+    `confirmed` là kết quả hộp thoại xác nhận (confirm) của trình duyệt."""
+    if not confirmed:
+        return _get_voters_table(), "Đã hủy, chưa xóa gì."
+    err = _require_storage()
+    if err:
+        return _get_voters_table(), err
+    try:
+        latest = storage.get_election(storage.get_latest_election_code() or "")
+    except StorageError as e:
+        return _get_voters_table(), f"{e}"
+    if latest and latest["status"] in (STATUS_RUNNING, STATUS_PAUSED):
+        return _get_voters_table(), (f"Phiên {latest['id']} đang '{latest['status']}' - phải Đóng phiên "
+                                     f"chốt sổ ở Tab 3 trước khi xóa danh sách cử tri.")
+    try:
+        deleted = storage.delete_all_voters()
+    except StorageError as e:
+        return _get_voters_table(), f"{e}"
+    return _get_voters_table(), f"Đã xóa {deleted} cử tri khỏi danh sách."
+
+
+def on_delete_voter(voter_id, confirmed):
+    """Xóa MỘT cử tri theo ID (cột ID trong bảng) — dùng khi Admin nhập sai."""
+    if not confirmed:
+        return _get_voters_table(), "Đã hủy, chưa xóa gì."
+    try:
+        vid = int(str(voter_id).strip())
+    except ValueError:
+        return _get_voters_table(), "Vui lòng nhập ID cử tri (số ở cột ID trong bảng)."
+    err = _require_storage()
+    if err:
+        return _get_voters_table(), err
+    try:
+        storage.delete_voter(vid)
+    except StorageError as e:
+        return _get_voters_table(), f"{e}"
+    return _get_voters_table(), f"Đã xóa cử tri ID {vid}."
+
+
 def on_lookup_voter(cccd):
     """Admin tra cứu nội bộ trạng thái 1 cử tri bằng CCCD (không phải địa
     chỉ ví nữa — cử tri giờ không biết và không cần biết địa chỉ ví của mình)."""
@@ -586,10 +778,10 @@ def on_unlock_voter(cccd):
 
 
 # ==============================================================================
-# GIAO DIỆN GRADIO BLOCKS
+# region GIAO DIỆN GRADIO BLOCKS
 # ==============================================================================
 
-with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử", theme=gr.themes.Soft()) as admin_app:
+with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử") as admin_app:
     gr.Markdown("# HỆ THỐNG QUẢN TRỊ BẦU CỬ ĐIỆN TỬ (ADMIN PORTAL)")
 
     with gr.Tabs() as main_tabs:
@@ -600,10 +792,18 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử", theme=gr.the
             dash_status = gr.Textbox(label="Trạng thái hệ thống", value="Đang kiểm tra kết nối...",
                                       interactive=False, lines=5)
             dash_refresh_btn = gr.Button("Kết nối lại / Làm mới", variant="primary")
+
+            gr.Markdown("---")
+            gr.Markdown(f"#### Kết quả cuộc bầu cử mới nhất "
+                        f"*(tự cập nhật mỗi {DASHBOARD_REFRESH_SECONDS} giây khi phiên đang diễn ra)*")
+            dash_header = gr.HTML()
+            results_chart = gr.Plot(label="Số phiếu theo ứng viên", show_label=False)
             results_table = gr.Dataframe(
                 headers=RESULTS_COLS,
+                label="Bảng chi tiết",
                 interactive=False,
             )
+            dash_timer = gr.Timer(DASHBOARD_REFRESH_SECONDS)
 
         # TAB 2: THÊM CUỘC BẦU CỬ & ỨNG VIÊN
         with gr.TabItem("2. Thêm Cuộc Bầu Cử & Ứng Viên", id="tab_create"):
@@ -701,6 +901,25 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử", theme=gr.the
                 interactive=False,
             )
 
+            # Ô ẩn nhận kết quả hộp thoại confirm() của trình duyệt (Đồng ý/Hủy)
+            delete_confirmed = gr.Checkbox(visible=False)
+
+            gr.Markdown(
+                "#### Xóa một cử tri (khi nhập sai)\n"
+                "*Nhập số ở cột ID trong bảng. Chỉ xóa được cử tri **chưa đăng nhập lần nào**.*"
+            )
+            with gr.Row():
+                delete_voter_id = gr.Textbox(label="ID cử tri cần xóa", placeholder="Ví dụ: 3")
+                delete_voter_btn = gr.Button("🗑️ Xóa cử tri này", variant="stop")
+
+            gr.Markdown(
+                "#### Xóa toàn bộ danh sách cử tri\n"
+                "*Danh sách tự động bị xóa khi Đóng phiên chốt sổ. Dùng nút này để dọn danh sách cũ "
+                "còn tồn đọng (chỉ được khi không có phiên nào đang diễn ra / tạm dừng). "
+                "Kết quả bầu cử trên blockchain KHÔNG bị ảnh hưởng.*"
+            )
+            delete_voters_btn = gr.Button("🗑️ Xóa toàn bộ danh sách cử tri", variant="stop")
+
             gr.Markdown("---")
             gr.Markdown("### Tra cứu một cử tri (theo CCCD)")
             lookup_cccd = gr.Textbox(label="CCCD cần tra cứu", placeholder="001234567890")
@@ -723,8 +942,10 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử", theme=gr.the
     # ==========================================================================
 
     # Dashboard
-    dash_refresh_btn.click(fn=on_check_connection, inputs=[], outputs=[dash_status, results_table])
-    admin_app.load(fn=on_check_connection, inputs=[], outputs=[dash_status, results_table])
+    dashboard_outputs = [dash_header, results_chart, results_table]
+    dash_refresh_btn.click(fn=on_check_connection, inputs=[], outputs=[dash_status, *dashboard_outputs])
+    admin_app.load(fn=on_check_connection, inputs=[], outputs=[dash_status, *dashboard_outputs])
+    dash_timer.tick(fn=on_dashboard_tick, inputs=[], outputs=dashboard_outputs, show_progress="hidden")
 
     # 1. Thêm ứng viên vào bảng tạm
     add_cand_btn.click(
@@ -781,6 +1002,22 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử", theme=gr.the
     )
     admin_app.load(fn=on_refresh_voters, inputs=[], outputs=[voters_table, voter_list_msg])
 
+    # Hàm `js` chạy trên trình duyệt TRƯỚC khi gọi Python: hiện hộp thoại xác
+    # nhận, kết quả (true/false) được truyền vào hàm Python qua ô ẩn delete_confirmed.
+    delete_voter_btn.click(
+        fn=on_delete_voter,
+        inputs=[delete_voter_id, delete_confirmed],
+        outputs=[voters_table, voter_list_msg],
+        js="(id, _) => [id, confirm('Bạn có chắc muốn xóa cử tri ID ' + id + '?')]",
+    )
+
+    delete_voters_btn.click(
+        fn=on_delete_all_voters,
+        inputs=[delete_confirmed],
+        outputs=[voters_table, voter_list_msg],
+        js="(_) => confirm('Xóa TOÀN BỘ danh sách cử tri? Thao tác này không thể hoàn tác.')",
+    )
+
     # 7. Tra cứu trạng thái cử tri (theo CCCD)
     lookup_btn.click(
         fn=on_lookup_voter,
@@ -796,4 +1033,5 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử", theme=gr.the
     )
 
 if __name__ == "__main__":
-    admin_app.launch(server_name="127.0.0.1", server_port=7860, share=False)
+    # Gradio 6: theme truyền vào launch() thay vì gr.Blocks()
+    admin_app.launch(server_name="127.0.0.1", server_port=7860, share=False, theme=gr.themes.Soft())

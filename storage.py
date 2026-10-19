@@ -507,6 +507,66 @@ def list_voters() -> list:
         conn.close()
 
 
+def delete_all_voters() -> int:
+    """Xóa TOÀN BỘ danh sách cử tri (kèm ví/private key đã mã hóa). Mỗi danh
+    sách chỉ dùng cho 1 cuộc bầu cử — phiếu bầu và kết quả nằm trên chain nên
+    không bị ảnh hưởng. Trả về số cử tri đã xóa."""
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM voters")
+        conn.commit()
+        return cur.rowcount
+    except MySQLError as e:
+        conn.rollback()
+        raise StorageError(f"Lỗi khi xóa danh sách cử tri: {e}")
+    finally:
+        conn.close()
+
+
+def reset_voters() -> int:
+    """Xóa TOÀN BỘ danh sách cử tri VÀ đưa bộ đếm ID về lại 1 (TRUNCATE) —
+    chỉ dùng khi chốt sổ, để danh sách của cuộc bầu cử sau đánh số lại từ đầu.
+    (Xóa thủ công dùng delete_all_voters(), giữ nguyên bộ đếm.)
+    Trả về số cử tri đã xóa."""
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM voters")
+        count = cur.fetchone()[0]
+        cur.execute("TRUNCATE TABLE voters")
+        return count
+    except MySQLError as e:
+        raise StorageError(f"Lỗi khi xóa danh sách cử tri: {e}")
+    finally:
+        conn.close()
+
+
+def delete_voter(voter_id: int) -> None:
+    """Xóa MỘT cử tri (dùng khi Admin nhập sai). Chỉ cho xóa cử tri CHƯA đăng
+    nhập lần nào (chưa có ví, chưa được cấp quyền trên chain) — nếu xóa cử
+    tri đã có ví rồi nhập lại, họ sẽ được sinh ví mới và có thể bầu thêm lần nữa."""
+    conn = _connect()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status, wallet_address FROM voters WHERE id = %s", (voter_id,))
+        row = cur.fetchone()
+        if row is None:
+            raise StorageError(f"Không tìm thấy cử tri có ID {voter_id}.")
+        if row["wallet_address"] is not None or row["status"] != "chua_kich_hoat":
+            raise StorageError(
+                f"Cử tri ID {voter_id} đã đăng nhập (đã có ví / được cấp quyền trên chain) nên không thể "
+                f"xóa lẻ — xóa rồi nhập lại sẽ cho người này bầu thêm lần nữa bằng ví mới."
+            )
+        cur.execute("DELETE FROM voters WHERE id = %s", (voter_id,))
+        conn.commit()
+    except MySQLError as e:
+        conn.rollback()
+        raise StorageError(f"Lỗi khi xóa cử tri: {e}")
+    finally:
+        conn.close()
+
+
 def get_voter_by_cccd_hash(cccd_hash: str):
     conn = _connect()
     try:
@@ -534,7 +594,7 @@ def get_voter_by_session(session_token: str):
 def set_access_code(cccd_hash: str, code_hash: str) -> None:
     """Lưu mã truy cập (đã băm) vừa sinh cho một cử tri, chuyển trạng thái
     sang 'da_cap_ma' (đã cấp mã, chờ xác thực). Cho phép gọi lại khi trạng
-    thái đã là 'da_cap_ma' (cấp lại mã mới, mã cũ tự mất hiệu lực) — trường
+    thái đã là 'da_cap_ma' (cấp lại mã mới, mã cũ tự mất hiệu lực) - trường
     hợp cử tri lỡ không kịp xem mã và phải nhập CCCD lại lần nữa."""
     conn = _connect()
     try:
