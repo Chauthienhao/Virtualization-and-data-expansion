@@ -158,7 +158,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "myvote" && <MyVoteTab sessionToken={sessionToken} hasVoted={hasVoted} />}
+        {activeTab === "myvote" && <MyVoteTab sessionToken={sessionToken} />}
       </main>
     </div>
   );

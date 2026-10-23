@@ -74,12 +74,6 @@ _REVERT_MESSAGES = {
         "Cử tri này đã bầu rồi, không thể bầu lần hai.",
     "ID Ung vien khong hop le":
         "Mã ứng viên không hợp lệ.",
-    "Chi gui yeu cau truoc khi bau cu dien ra":
-        "Cử tri chỉ có thể gửi yêu cầu xác thực TRƯỚC khi cuộc bầu cử bắt đầu.",
-    "Dia chi vi nay da duoc cap quyen roi":
-        "Địa chỉ ví này đã được cấp quyền rồi, không cần gửi yêu cầu nữa.",
-    "Ban da gui yeu cau truoc do, vui long cho Admin duyet":
-        "Địa chỉ ví này đã gửi yêu cầu trước đó, đang chờ Admin duyệt.",
 }
 
 
@@ -273,10 +267,6 @@ class ElectionClient:
         cid, name, votes = self._call(self.contract.functions.candidates(candidate_id))
         return {"id": cid, "name": name, "votes": votes}
 
-    def get_all_candidates(self) -> list:
-        count = self.get_candidates_count()
-        return [self.get_candidate(i) for i in range(1, count + 1)]
-
     def get_voter(self, address: str) -> dict:
         address = self._checksum(address)
         is_authorized, has_voted, voted_candidate_id = self._call(self.contract.functions.voters(address))
@@ -286,29 +276,6 @@ class ElectionClient:
             "has_voted": has_voted,
             "voted_candidate_id": voted_candidate_id,
         }
-
-    def get_pending_requests(self) -> list:
-        """Trả về danh sách địa chỉ ví ĐANG chờ Admin duyệt (đã gửi
-        requestToVote() nhưng chưa được authorizeVoter/rejectVoterRequest
-        xử lý). pendingRequests trên chain là một mảng chỉ-thêm-vào (không
-        tự xóa phần tử cũ để tiết kiệm gas), nên phải lọc lại bằng
-        hasRequested(addr) để biết cái nào THẬT SỰ còn đang chờ."""
-        count = self._call(self.contract.functions.getPendingRequestsCount())
-        result = []
-        seen = set()
-        for i in range(count):
-            addr = self._call(self.contract.functions.pendingRequests(i))
-            if addr in seen:
-                continue  # phòng trường hợp lý thuyết trùng địa chỉ trong mảng
-            seen.add(addr)
-            if self._call(self.contract.functions.hasRequested(addr)):
-                result.append(addr)
-        return result
-
-    def reject_voter_request(self, address: str) -> dict:
-        address = self._checksum(address)
-        self._send(self.contract.functions.rejectVoterRequest(address))
-        return {"address": address}
 
     def _checksum(self, address: str) -> str:
         try:

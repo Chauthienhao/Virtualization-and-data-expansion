@@ -7,7 +7,7 @@ import * as api from "../../api";
 // cuộc bầu cử kết thúc" — tab này KHÔNG BAO GIỜ hiện tổng số phiếu hay
 // bảng xếp hạng ứng viên, chỉ hiện đúng lựa chọn của CHÍNH người đang đăng
 // nhập (API /my-vote cũng chỉ trả đúng dữ liệu đó, xem voter_api.py).
-export default function MyVoteTab({ sessionToken, hasVoted }) {
+export default function MyVoteTab({ sessionToken }) {
   const [myVote, setMyVote] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

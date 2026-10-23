@@ -379,6 +379,12 @@ def on_submit_election(title, desc):
         msg = (f"Phiên {latest['id']} đang TẠM DỪNG (chưa kết thúc). Hãy vào Tab 3 bấm "
                f"'Bắt đầu' để tiếp tục hoặc 'Đóng phiên chốt sổ' trước khi tạo phiên mới.")
         return msg, df_draft, df_elections, gr.Tabs(selected="tab_create")
+    # Phiên thuộc contract cũ (Ganache restart / deploy lại) mà chưa đóng: bắt
+    # đóng trước, để danh sách cử tri cũ được xóa đúng lúc, không lẫn sang phiên mới.
+    if latest and latest["status"] != STATUS_ENDED and not _same_contract(latest):
+        msg = (f"Phiên {latest['id']} thuộc contract cũ và chưa được đóng (trạng thái: {latest['status']}). "
+               f"Hãy vào Tab 3 bấm 'Đóng phiên chốt sổ' cho phiên này trước khi tạo phiên mới.")
+        return msg, df_draft, df_elections, gr.Tabs(selected="tab_create")
 
     # Thời gian bắt đầu/kết thúc thực tế do nút Bắt đầu/Đóng phiên ở Tab 3
     # điều khiển trên chain, nên không nhập tay nữa (cột trong DB để trống).
@@ -508,6 +514,41 @@ STATUS_PAUSED = "Tạm dừng"
 STATUS_ENDED = "Đã kết thúc"
 
 
+def _close_orphan_election(item, new_status, is_latest):
+    """Phiên thuộc contract CŨ (Ganache bị tắt/mở lại hoặc đã deploy contract
+    mới). Contract đó không còn gọi được nên không thể Bắt đầu/Tạm dừng, nhưng
+    vẫn phải cho Đóng phiên chốt sổ — chỉ cập nhật MySQL — để phiên không bị
+    kẹt ở 'Đang diễn ra' mãi và danh sách cử tri được dọn."""
+    def _result(msg):
+        return pd.DataFrame(_get_elections_table(), columns=ELECTION_COLS), msg
+
+    if item["status"] == STATUS_ENDED:
+        return _result(f"Phiên {item['id']} thuộc contract cũ và đã đóng chốt sổ rồi.")
+    if new_status != "Đóng phiên chốt sổ":
+        return _result(
+            f"Phiên {item['id']} thuộc contract cũ ({item['contract_address'] or 'không rõ'}), không phải "
+            f"contract đang kết nối ({client.contract_address}) nên không thể Bắt đầu/Tạm dừng nữa. "
+            f"Hãy chọn 'Đóng phiên chốt sổ' để kết thúc phiên này."
+        )
+
+    try:
+        storage.update_election_status(item["id"], STATUS_ENDED)
+        storage.set_election_time(item["id"], "end")
+        msg = (f"Đã đóng chốt sổ phiên {item['id']} (chỉ trong MySQL — contract cũ không còn kết nối "
+               f"được nên không gửi giao dịch nào lên chain).")
+        # Chỉ xóa danh sách cử tri khi đây vẫn là phiên mới nhất; nếu đã có
+        # phiên mới hơn thì danh sách hiện tại có thể là của phiên mới đó.
+        if is_latest:
+            deleted = storage.reset_voters()
+            msg += f"\nĐã xóa {deleted} cử tri khỏi danh sách (danh sách chỉ dùng cho phiên này)."
+        else:
+            msg += ("\nKhông tự xóa danh sách cử tri vì đã có phiên mới hơn — nếu danh sách hiện tại "
+                    "vẫn là của phiên cũ, hãy xóa thủ công ở Tab 4.")
+    except StorageError as e:
+        return _result(f"Lỗi khi đóng phiên trong MySQL: {e}")
+    return _result(msg)
+
+
 def on_update_election_status(election_id, new_status):
     """Bắt đầu / Tạm dừng / Đóng phiên: gọi THẬT lên chain (startElection/endElection).
     Lưu ý: hợp đồng chỉ có MỘT electionActive dùng chung, nên chỉ phiên mới
@@ -529,10 +570,7 @@ def on_update_election_status(election_id, new_status):
         return pd.DataFrame(_get_elections_table(), columns=ELECTION_COLS), f"Không tìm thấy mã phiên: {election_id}"
 
     if not _same_contract(item):
-        return pd.DataFrame(_get_elections_table(), columns=ELECTION_COLS), (
-            f"Phiên {item['id']} thuộc một contract cũ, không phải contract đang kết nối "
-            f"({client.contract_address}) — không thể Bắt đầu/Đóng phiên này nữa."
-        )
+        return _close_orphan_election(item, new_status, is_latest=item["id"] == latest_code)
 
     if item["id"] != latest_code:
         return pd.DataFrame(_get_elections_table(), columns=ELECTION_COLS), (
