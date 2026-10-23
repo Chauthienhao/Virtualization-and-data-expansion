@@ -267,6 +267,27 @@ class ElectionClient:
         cid, name, votes = self._call(self.contract.functions.candidates(candidate_id))
         return {"id": cid, "name": name, "votes": votes}
 
+    def get_vote_receipt(self, address: str):
+        """Biên nhận lá phiếu của một ví: tìm event VotedEvent mà contract
+        phát ra lúc ví này bầu (event có _voter là indexed nên lọc theo địa
+        chỉ được). Trả về {tx_hash, block_number, timestamp} hoặc None."""
+        address = self._checksum(address)
+        try:
+            logs = self.contract.events.VotedEvent.get_logs(
+                argument_filters={"_voter": address}, from_block=0,
+            )
+        except Exception as e:
+            raise ElectionError(_humanize_error(e, self.rpc_url))
+        if not logs:
+            return None
+        log = logs[-1]
+        block = self.w3.eth.get_block(log["blockNumber"])
+        return {
+            "tx_hash": log["transactionHash"].to_0x_hex(),
+            "block_number": log["blockNumber"],
+            "timestamp": block["timestamp"],
+        }
+
     def get_voter(self, address: str) -> dict:
         address = self._checksum(address)
         is_authorized, has_voted, voted_candidate_id = self._call(self.contract.functions.voters(address))
@@ -305,9 +326,10 @@ class ElectionClient:
     def end_election(self) -> None:
         self._send(self.contract.functions.endElection())
 
-    def vote(self, candidate_id: int) -> None:
+    def vote(self, candidate_id: int):
         """Bầu cho một ứng viên. KHÔNG có modifier onlyAdmin trong Solidity —
         dùng được bởi mọi tài khoản. Trong voter_api.py, hàm này được gọi
         trên một ElectionClient KHÁC (khởi tạo bằng private_key của cử tri,
-        không phải của Admin), để giao dịch được ký đúng danh nghĩa cử tri."""
-        self._send(self.contract.functions.vote(candidate_id))
+        không phải của Admin), để giao dịch được ký đúng danh nghĩa cử tri.
+        Trả về biên lai giao dịch (để tính phí gas đã trả)."""
+        return self._send(self.contract.functions.vote(candidate_id))
