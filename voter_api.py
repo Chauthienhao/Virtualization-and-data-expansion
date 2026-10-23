@@ -9,7 +9,7 @@ bằng fetch(), không tự ký gì cả.
 
 CHẠY:
     pip install fastapi "uvicorn[standard]"
-    uvicorn voter_api:app --reload --port 8001
+    python -m uvicorn voter_api:app --reload --port 8001
 
 LUỒNG ĐĂNG NHẬP (2 bước, xem thêm ghi chú trong storage.py/voter_accounts.py):
     POST /login        {cccd}            -> {code}             (hiện mã ngay trên màn hình)
