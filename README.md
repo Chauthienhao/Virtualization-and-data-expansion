@@ -1,213 +1,128 @@
-# Hệ Thống Bầu Cử Điện Tử (Blockchain E-Voting)
+# Blockchain Vote Online – Docker Deployment
 
-Đồ án công nghệ: hệ thống bầu cử điện tử dùng Smart Contract (Solidity) làm
-tầng lưu trữ phiếu bầu bất biến, MySQL làm tầng quản lý cử tri/phiên off-chain,
-Admin portal dựng bằng Gradio (Python), và giao diện cử tri dựng bằng ReactJS.
+## 1. Giới thiệu
 
-> ⚠️ Nhánh này là bản đang chạy được của **hao**, nhưng **chưa hoàn chỉnh** —
-> xem phần [Việc còn thiếu / đang làm](#việc-còn-thiếu--đang-làm) ở cuối.
+Dự án hệ thống bỏ phiếu trực tuyến sử dụng Blockchain, được triển khai bằng Docker Compose nhằm đóng gói các thành phần ứng dụng và hỗ trợ triển khai trên nhiều môi trường.
 
----
+## 2. Công nghệ sử dụng
 
-## Kiến trúc tổng quan
+- **Frontend:** React, Vite, Tailwind CSS
+- **Backend API:** Python, FastAPI
+- **Admin:** Python, Gradio
+- **Database:** MySQL 8.4
+- **Blockchain:** Ethereum Smart Contract (Solidity), Ganache
+- **Containerization:** Docker, Docker Compose
+- **Web Server:** Nginx
 
-```
-Ganache (blockchain giả lập, local)
-        │
-        ▼
-Election.sol  ──deploy.py──>  đã deploy lên Ganache
-        │
-        ▼
-blockchain_client.py (Web3.py) ── dùng chung bởi ──┬── adminUI.py   (Gradio, Admin)
-                                                     └── voter_api.py (FastAPI, cử tri)
-        │
-        ▼
-MySQL (storage.py) — danh sách cử tri, phiên đăng nhập, ví custodial đã mã hóa
-        │
-        ▼
-Frontend ReactJS (Vite) ── gọi voter_api.py qua api.js ── người bầu cử dùng
-```
+## 3. Các thành phần Docker
 
-Cử tri **không dùng MetaMask**: hệ thống tự sinh và giữ hộ ví (custodial
-wallet) cho mỗi CCCD, ẩn hoàn toàn với người dùng — cử tri chỉ cần nhập CCCD
-và mã xác thực do hệ thống cấp.
+| Service | Chức năng | Cổng truy cập |
+|---|---|---|
+| frontend | Giao diện cử tri (React + Nginx) | 3000 |
+| api | Backend FastAPI | 8001 |
+| admin | Giao diện quản trị Gradio | 7861 |
+| db | Cơ sở dữ liệu MySQL | Nội bộ Docker |
 
----
+**Lưu ý:** Ganache Desktop hiện chạy trực tiếp trên Windows tại cổng 7545, chưa được Docker hóa.
 
-## Yêu cầu hệ thống
+## 4. Yêu cầu môi trường
 
-- [Ganache](https://trufflesuite.com/ganache/) (bản desktop, chạy local)
-- Python 3.11+
-- Node.js (khuyến nghị bản LTS mới nhất) + npm
-- MySQL Server (local)
-- Visual Studio Code (hoặc IDE bất kỳ)
+- Docker Desktop
+- Docker Compose
+- Ganache Desktop
+- Git
+- Python và các thư viện trong `requirements.txt` nếu cần deploy hợp đồng từ Windows
 
----
+## 5. Cấu hình môi trường
 
-## Cấu trúc thư mục chính
+Tạo file `.env` và `.env.docker` dựa trên `.env.example`, sau đó điền các giá trị cấu hình phù hợp.
 
-```
-Virtualization-and-data-expansion/
-├── Election.sol              # Smart contract
-├── deploy.py                 # Script compile + deploy contract (không cần Remix)
-├── ElectionABI.json           # ABI được deploy.py tự sinh ra
-├── blockchain_client.py       # Lớp Web3.py dùng chung (Admin + cử tri)
-├── storage.py                 # Lưu trữ MySQL (cử tri, phiên, bầu cử)
-├── voter_accounts.py          # Sinh/mã hóa ví custodial, mã xác thực, CCCD hash
-├── adminUI.py                 # Giao diện Admin (Gradio)
-├── voter_api.py                # API cho cử tri (FastAPI)
-├── requirements.txt
-├── .env.example
-├── .gitignore
-└── src/                        # Frontend ReactJS (Vite)
-    ├── api.js
-    ├── App.jsx
-    └── components/...
-```
-
----
-
-## Hướng dẫn chạy
-
-### 1. Cài Ganache
-
-Tải và mở Ganache trên máy → chọn **Quick Start** để tạo một workspace mới
-(chain local, 10 tài khoản sẵn ETH để test). Ghi lại **RPC Server** (thường
-là `http://127.0.0.1:7545`) — cần dùng ở bước 3.
-
-> Lưu ý: mỗi lần **Quick Start** lại hoặc restart Ganache, danh sách 10 tài
-> khoản và mọi contract đã deploy trước đó sẽ **mất hết** — phải deploy lại
-> (bước 4) mỗi khi làm việc này.
-
-### 2. Cài đặt thư viện Python
-
-Mở project bằng VS Code → mở Terminal → chạy:
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Tạo file `.env`
-
-Copy `.env.example` thành `.env` (cùng thư mục gốc project):
-
-```bash
-copy .env.example .env      # Windows
-# hoặc
-cp .env.example .env        # macOS / Linux
-```
-
-Mở `.env` và điền các giá trị của máy mình, ví dụ:
+Một số biến môi trường quan trọng:
 
 ```env
-DB_HOST=127.0.0.1
+RPC_URL=http://host.docker.internal:7545
+CONTRACT_ADDRESS=<dia_chi_smart_contract>
+DB_HOST=db
 DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=123456          # đổi theo mật khẩu MySQL thật của bạn
 DB_NAME=election_admin
-
-RPC_URL=http://127.0.0.1:7545
-CONTRACT_ADDRESS=            # sẽ điền ở bước 4, sau khi deploy
-
-VOTER_KEY_ENCRYPTION_KEY=    # xem lệnh sinh khóa ở bước 3b
-CCCD_HASH_PEPPER=mot-chuoi-bi-mat-tuy-chon
-VOTER_FUNDING_AMOUNT_ETH=0.01
-
-VITE_API_BASE_URL=http://127.0.0.1:8001
 ```
 
-**3b. Sinh `VOTER_KEY_ENCRYPTION_KEY`** (khóa mã hóa private key cử tri —
-bắt buộc phải có, nếu không sẽ lỗi khi cử tri đăng nhập lần đầu):
+Các biến khác như mật khẩu MySQL, khóa mã hóa và thông tin tài khoản blockchain cần được cấu hình đầy đủ theo yêu cầu ứng dụng.
+
+**Không commit `.env`, `.env.docker`, mật khẩu hoặc private key lên GitHub.**
+
+## 6. Khởi chạy hệ thống
+
+### Bước 1: Khởi động Ganache
+
+Mở Ganache Desktop trên Windows, sử dụng blockchain đã triển khai hợp đồng hoặc deploy hợp đồng mới nếu cần.
+
+Đảm bảo `CONTRACT_ADDRESS` trong `.env.docker` trỏ đến hợp đồng đang tồn tại.
+
+### Bước 2: Build và chạy Docker
+
+Mở terminal tại thư mục dự án:
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+docker compose --env-file .env.docker up -d --build
 ```
 
-Copy kết quả in ra, dán vào `VOTER_KEY_ENCRYPTION_KEY` trong `.env`.
-⚠️ Không đổi lại khóa này sau khi đã có cử tri dùng hệ thống — đổi khóa sẽ
-khiến mọi private key đã mã hóa trước đó không giải mã được nữa.
+### Bước 3: Kiểm tra container
 
-### 4. Deploy Smart Contract
-
-Trong VS Code, mở file `deploy.py` → **Run** (hoặc `python deploy.py` trong
-terminal). Script sẽ tự compile `Election.sol` và deploy lên Ganache, rồi in
-ra địa chỉ contract, ví dụ:
-
-```
-CONTRACT_ADDRESS=0xABCDEF1234567890...
-```
-
-Copy địa chỉ này, dán vào `CONTRACT_ADDRESS` trong `.env`.
-
-### 5. Tạo database MySQL
-
-Đảm bảo MySQL Server đang chạy và `.env` đã khai đúng `DB_PASSWORD`. Database
-và các bảng cần thiết (`elections`, `voters`, ...) sẽ được tự tạo khi chạy
-`adminUI.py` lần đầu (gọi `storage.init_db()`), không cần tạo tay bằng
-`CREATE DATABASE`.
-
-### 6. Chạy Backend + Frontend (3 terminal song song)
-
-**Terminal 1 — API cho cử tri:**
 ```bash
-uvicorn voter_api:app --reload --port 8001
+docker compose --env-file .env.docker ps
 ```
 
-**Terminal 2 — Giao diện Admin:**
+### Bước 4: Truy cập ứng dụng
+
+- React Frontend: http://localhost:3000
+- FastAPI Swagger: http://localhost:8001/docs
+- Gradio Admin: http://localhost:7861
+
+## 7. Các lệnh Docker thường dùng
+
+Xem trạng thái container:
+
 ```bash
-python adminUI.py
+docker compose --env-file .env.docker ps
 ```
 
-**Terminal 3 — Frontend ReactJS:**
+Xem log:
+
 ```bash
-npm install
-npm run dev
+docker compose --env-file .env.docker logs -f
 ```
 
-Sau khi cả 3 chạy xong, Admin portal thường mở ở `http://127.0.0.1:7860`,
-trang cử tri ở địa chỉ mà `npm run dev` in ra (thường `http://localhost:5173`).
+Dừng container:
 
----
-
-## `.gitignore`
-
-Nếu project chưa có file `.gitignore`, tạo mới ở thư mục gốc với nội dung
-sau (tránh push nhầm thông tin nhạy cảm hoặc file build/cache lên nhánh):
-
-```gitignore
-.env
-__pycache__/
-node_modules/
-dist/
+```bash
+docker compose --env-file .env.docker stop
 ```
 
----
+Khởi động lại:
 
-## Lưu ý khi gặp lỗi
+```bash
+docker compose --env-file .env.docker up -d
+```
 
-- **`ModuleNotFoundError: No module named 'solcx'`** khi chạy `deploy.py` →
-  chưa chạy `pip install -r requirements.txt`, hoặc thiếu `py-solc-x` trong
-  `requirements.txt` → cài thêm: `pip install py-solc-x`.
-- **Sửa `Election.sol` xong nhưng chạy vẫn lỗi như cũ** → nhớ chạy lại
-  `python deploy.py` để lấy `CONTRACT_ADDRESS` mới, dán lại vào `.env`, rồi
-  **tắt hẳn và chạy lại** `voter_api.py`/`adminUI.py` (không chỉ để
-  `--reload` tự load lại — `--reload` chỉ theo dõi file `.py`, không theo
-  dõi `.env`, nên đổi `.env` mà không restart tay thì process vẫn giữ giá
-  trị cũ).
-- **`BadFunctionCallOutput` / `InsufficientDataBytes`** khi gọi contract →
-  `.env` đang trỏ vào một địa chỉ không có contract thật trên Ganache hiện
-  tại (do Ganache đã Quick Start lại, hoặc `.env` chưa cập nhật đúng).
-- **Cử tri báo "Phiên đăng nhập trước đó vẫn đang mở"** dù họ chưa đăng
-  xuất chủ động (do tắt/crash trình duyệt giữa chừng) → vào tab **"Danh
-  Sách Cử Tri"** trong Admin portal, dùng mục **"Mở khóa phiên bị kẹt"** với
-  CCCD tương ứng.
+Không sử dụng `docker compose down -v` nếu muốn giữ dữ liệu MySQL.
 
----
+## 8. Tiến độ triển khai
 
-## Việc còn thiếu / đang làm
+- [x] Docker hóa MySQL
+- [x] Docker hóa Gradio Admin
+- [x] Docker hóa FastAPI
+- [x] Docker hóa React Frontend
+- [x] Kết nối Docker với Ganache Desktop
+- [x] Kiểm tra kết nối React → FastAPI
+- [ ] Docker hóa Ganache và cấu hình lưu trữ blockchain
+- [ ] Kiểm thử toàn bộ nghiệp vụ bỏ phiếu
+- [ ] Triển khai hệ thống lên Cloud
+- [ ] Thiết lập CI/CD bằng GitHub Actions
 
-- [ ] Hoàn thiện giao diện/luồng còn thiếu ở phía Admin hoặc cử tri (bổ sung
-      dần theo tiến độ đồ án).
-- [ ] Viết sẵn script/migration để clear dữ liệu `voters` khi redeploy contract
-      mới (tránh lẫn ví đã cấp quyền trên contract cũ).
-- [ ] Hướng dẫn deploy lên testnet thật (ví dụ Sepolia) nếu đồ án yêu cầu.
+## 9. Ghi chú
+
+- MySQL sử dụng Docker Volume để lưu trữ dữ liệu.
+- Ganache Desktop phải được khởi động trước khi kiểm thử các chức năng blockchain.
+- Nếu Ganache reset blockchain, có thể cần deploy lại Smart Contract và cập nhật `CONTRACT_ADDRESS`.
+- Cấu hình hiện tại phục vụ mục đích phát triển và kiểm thử đồ án, chưa phải cấu hình production.

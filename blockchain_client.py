@@ -115,7 +115,9 @@ class ElectionClient:
         # sau khi deploy lại/sửa .env thì nhận đúng giá trị mới, không phải
         # khởi động lại cả server.
         try:
-            load_dotenv(override=True)
+            # load_dotenv(override=True)
+            load_dotenv() # Sửa dòng này cho Docker
+            # để ưu tiên biến môi trường từ .env.docker, khi chạy trực tiếp trên Win thì Python vẫn đọc .env bình thường
         except NameError:
             pass  # chưa cài python-dotenv
         self.rpc_url = rpc_url or os.getenv("RPC_URL", "http://127.0.0.1:7545")

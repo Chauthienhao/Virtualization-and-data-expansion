@@ -1,0 +1,28 @@
+# Build image React
+
+# Giai đoạn 1: Build React bằng Node.js
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+# Cài đặt thư viện
+COPY package*.json ./
+RUN npm ci
+
+# Sao chép mã nguồn
+COPY index.html vite.config.js ./
+COPY src ./src
+
+# Địa chỉ API được sử dụng khi build React
+ARG VITE_API_BASE_URL=http://127.0.0.1:8001
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
+# Build React thành file tĩnh
+RUN npm run build
+
+# Giai đoạn 2: Chạy website bằng Nginx
+FROM nginx:alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80

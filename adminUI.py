@@ -9,6 +9,8 @@ import storage
 from storage import StorageError
 import voter_accounts
 
+import os
+
 # ==============================================================================
 # KẾT NỐI BLOCKCHAIN (khởi tạo lúc mở app; có thể "Kết nối lại" từ Dashboard
 # nếu lúc mở app Ganache chưa chạy hoặc .env chưa đúng)
@@ -1034,4 +1036,8 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử") as admin_app
 
 if __name__ == "__main__":
     # Gradio 6: theme truyền vào launch() thay vì gr.Blocks()
-    admin_app.launch(server_name="127.0.0.1", server_port=7860, share=False, theme=gr.themes.Soft())
+    admin_app.launch(
+        server_name=os.getenv("GRADIO_SERVER_NAME", "127.0.0.1"), # Chạy trực tiếp trên Windows dùng 127.0.0.1, chạy trong Docker dùng 0.0.0.0
+        server_port=7860, 
+        share=False, 
+        theme=gr.themes.Soft())

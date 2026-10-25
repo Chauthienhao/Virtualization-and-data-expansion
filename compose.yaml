@@ -1,0 +1,70 @@
+# Khai báo và kết nối 4 container
+
+services:
+  db:
+    image: mysql:8.4
+    container_name: blockchain_vote_db
+    restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DOCKER_DB_ROOT_PASSWORD:?Set DOCKER_DB_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: election_admin
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    image: blockchain-vote-python:local
+    container_name: blockchain_vote_admin
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    ports:
+      - "7861:7860"
+    command: python adminUI.py
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    image: blockchain-vote-python:local
+    container_name: blockchain_vote_api
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    ports:
+      - "8001:8001"
+    command: python -m uvicorn voter_api:app --host 0.0.0.0 --port 8001
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: http://127.0.0.1:8001
+    image: blockchain-vote-frontend:local
+    container_name: blockchain_vote_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+      
+volumes:
+  mysql_data:
