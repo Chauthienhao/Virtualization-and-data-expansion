@@ -3,7 +3,7 @@ import { User, LoaderCircle, RefreshCw } from "lucide-react";
 
 // LƯU Ý: candidates ở đây CHỈ có {id, name} — API /me cố tình KHÔNG trả về
 // số phiếu, để không lộ kết quả cho cử tri giữa chừng (xem voter_api.py).
-export default function VotingAreaTab({ candidates, hasVoted, electionActive, onVote, onRefresh }) {
+export default function VotingAreaTab({ candidates, hasVoted, voteFee, electionActive, onVote, onRefresh }) {
   const [votingId, setVotingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -69,6 +69,11 @@ export default function VotingAreaTab({ candidates, hasVoted, electionActive, on
       {hasVoted && (
         <p className="text-green-600 font-medium">
           Bạn đã bỏ phiếu — cảm ơn bạn đã tham gia! Xem lại lựa chọn của bạn ở tab "Phiếu Của Tôi".
+          {voteFee && (
+            <span className="block text-sm text-gray-500 font-normal mt-1">
+              Phí giao dịch: {voteFee.feeEth} ETH (xem chi tiết ở tab "Tài Khoản")
+            </span>
+          )}
         </p>
       )}
       {error && <p className="text-red-500 text-sm max-w-md mx-auto">{error}</p>}

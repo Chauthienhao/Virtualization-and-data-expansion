@@ -27,15 +27,10 @@ contract Election {
     mapping(uint => Candidate) public candidates;
     uint public candidatesCount;
 
-    // 3b. Hàng đợi yêu cầu xác thực cử tri (cử tri tự gửi, Admin duyệt/từ chối)
-    mapping(address => bool) public hasRequested; // true = đang chờ Admin duyệt
-    address[] public pendingRequests; // nhật ký mọi địa chỉ từng gửi yêu cầu
-
-    // 4. Các sự kiện (Events) để Frontend (ReactJS) lắng nghe
+    // 4. Các sự kiện (Events) — nhật ký trên chain, xem được trong Ganache (tab Events)
     event VotedEvent(address indexed _voter, uint _candidateId);
     event ElectionStarted();
     event ElectionEnded();
-    event AuthorizationRequested(address indexed _voter);
 
     // 5. Bộ lọc quyền (Modifier)
     modifier onlyAdmin() {
@@ -66,12 +61,6 @@ contract Election {
     // không bao giờ cấp quyền được, bị khóa ngoài vĩnh viễn.
     function authorizeVoter(address _voter) public onlyAdmin {
         voters[_voter].isAuthorized = true;
-        hasRequested[_voter] = false; // duyệt xong thì không còn "đang chờ" nữa
-    }
-
-    // Admin từ chối một yêu cầu: gỡ khỏi hàng đợi "đang chờ", KHÔNG cấp quyền.
-    function rejectVoterRequest(address _voter) public onlyAdmin {
-        hasRequested[_voter] = false;
     }
 
     function startElection() public onlyAdmin {
@@ -85,24 +74,8 @@ contract Election {
     }
 
     // ==========================================
-    // HÀM DÀNH CHO CỬ TRI (GỌI TỪ REACTJS + METAMASK)
+    // HÀM DÀNH CHO CỬ TRI (backend voter_api.py ký hộ bằng ví custodial của cử tri)
     // ==========================================
-
-    // Cử tri tự gửi yêu cầu xin cấp quyền bầu cử — KHÔNG tự động được cấp
-    // quyền, chỉ được thêm vào hàng đợi để Admin xem và quyết định duyệt
-    // hay từ chối (qua authorizeVoter/rejectVoterRequest ở trên).
-    function requestToVote() public {
-        require(!electionActive, "Chi gui yeu cau truoc khi bau cu dien ra");
-        require(!voters[msg.sender].isAuthorized, "Dia chi vi nay da duoc cap quyen roi");
-        require(!hasRequested[msg.sender], "Ban da gui yeu cau truoc do, vui long cho Admin duyet");
-        hasRequested[msg.sender] = true;
-        pendingRequests.push(msg.sender);
-        emit AuthorizationRequested(msg.sender);
-    }
-
-    function getPendingRequestsCount() public view returns (uint) {
-        return pendingRequests.length;
-    }
 
     function vote(uint _candidateId) public {
         // Kiểm tra các điều kiện tiên quyết

@@ -9,7 +9,7 @@ bằng fetch(), không tự ký gì cả.
 
 CHẠY:
     pip install fastapi "uvicorn[standard]"
-    uvicorn voter_api:app --reload --port 8001
+    python -m uvicorn voter_api:app --reload --port 8001
 
 LUỒNG ĐĂNG NHẬP (2 bước, xem thêm ghi chú trong storage.py/voter_accounts.py):
     POST /login        {cccd}            -> {code}             (hiện mã ngay trên màn hình)
@@ -29,6 +29,7 @@ thể vá được ở tầng ứng dụng.
 """
 
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -131,6 +132,19 @@ def _current_candidates() -> list:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _short_address(address: str) -> str:
+    """Chỉ cho cử tri xem địa chỉ ví RÚT GỌN (0xF3c6…6209b): đủ để nhận ra ví
+    của mình, nhưng không đưa được cho người khác tra phiếu trên chain —
+    tránh kẽ hở mua bán phiếu / ép buộc bầu. Địa chỉ đầy đủ không bao giờ
+    được gửi ra frontend."""
+    return f"{address[:6]}…{address[-5:]}"
+
+
+def _format_eth(wei: int) -> str:
+    """6 chữ số thập phân — Ganache GUI chỉ hiện 2 số nên 0.005 thành 0.01."""
+    return f"{Decimal(wei) / Decimal(10**18):.6f}"
+
+
 def _get_session_voter(session_token: str) -> dict:
     try:
         voter = storage.get_voter_by_session(session_token)
@@ -228,11 +242,17 @@ def me(session_token: str):
     try:
         election_active = client.get_election_active()
         voter_chain = client.get_voter(voter["wallet_address"])
+        balance_wei = client.w3.eth.get_balance(voter_chain["address"])
     except ElectionError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không đọc được số dư ví: {e}")
 
     return {
         "fullName": voter["full_name"],
+        # Chỉ để XEM (không có API nào sửa được 2 trường này); số dư đọc thẳng từ chain.
+        "walletAddressShort": _short_address(voter_chain["address"]),
+        "balanceEth": _format_eth(balance_wei),
         "electionActive": election_active,
         "isAuthorized": voter_chain["is_authorized"],
         "hasVoted": voter_chain["has_voted"],
@@ -265,7 +285,9 @@ def vote(req: VoteRequest):
     # đứng tên đúng cử tri, không phải đứng tên Admin.
     try:
         voter_client = ElectionClient(private_key=private_key)
-        voter_client.vote(req.candidate_id)
+        balance_before = voter_client.w3.eth.get_balance(voter_client.account)
+        receipt = voter_client.vote(req.candidate_id)
+        balance_after = voter_client.w3.eth.get_balance(voter_client.account)
     except ElectionError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -276,7 +298,20 @@ def vote(req: VoteRequest):
     except StorageError:
         pass  # không chặn phản hồi thành công chỉ vì lỗi dọn dẹp phụ, giao dịch đã lên chain rồi
 
-    return {"success": True}
+    # Số tiền bị trừ = chênh lệch số dư trước/sau (vote() không chuyển ETH,
+    # value = 0, nên chênh lệch chính là phí gas = gas đã dùng × giá gas thực trả).
+    gas_used = receipt["gasUsed"]
+    gas_price = receipt.get("effectiveGasPrice")
+    if gas_price is None:
+        gas_price = voter_client.w3.eth.get_transaction(receipt["transactionHash"])["gasPrice"]
+    return {
+        "success": True,
+        "gasUsed": gas_used,
+        "gasPriceGwei": f"{Decimal(gas_price) / Decimal(10**9):.4f}".rstrip("0").rstrip("."),
+        "feeEth": _format_eth(balance_before - balance_after),
+        "balanceBeforeEth": _format_eth(balance_before),
+        "balanceAfterEth": _format_eth(balance_after),
+    }
 
 
 @app.get("/my-vote")
@@ -293,12 +328,42 @@ def my_vote(session_token: str):
     if not voter_chain["has_voted"]:
         return {"hasVoted": False}
 
+    cid = voter_chain["voted_candidate_id"]
     try:
-        candidate = client.get_candidate(voter_chain["voted_candidate_id"])
+        candidate = client.get_candidate(cid)
+        receipt = client.get_vote_receipt(voter["wallet_address"])
     except ElectionError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"hasVoted": True, "votedCandidate": {"id": candidate["id"], "name": candidate["name"]}}
+    # Thông tin off-chain (SBD, đơn vị, tên cuộc bầu cử) — MySQL lỗi thì vẫn
+    # trả phần đọc từ chain, chỉ để trống các trường này.
+    meta, election_title = {"code": "", "unit": ""}, ""
+    try:
+        meta = storage.get_candidate_meta(client.contract_address, cid)
+        item = storage.get_election(storage.get_latest_election_code() or "")
+        if item and cid in item["candidate_ids"] and \
+                item["contract_address"].lower() == client.contract_address.lower():
+            election_title = f"{item['id']} · {item['title']}"
+    except StorageError:
+        pass
+
+    # KHÔNG trả số phiếu của ứng viên; mã giao dịch chỉ gửi bản RÚT GỌN (cùng lý
+    # do với địa chỉ ví — mã đầy đủ đủ để người khác tra ra phiếu trên chain).
+    return {
+        "hasVoted": True,
+        "votedCandidate": {
+            "id": candidate["id"],
+            "name": candidate["name"],
+            "code": meta["code"],
+            "unit": meta["unit"],
+            "electionTitle": election_title,
+        },
+        "receipt": {
+            "txHashShort": _short_address(receipt["tx_hash"]),
+            "blockNumber": receipt["block_number"],
+            "timestamp": receipt["timestamp"],
+        } if receipt else None,
+    }
 
 
 @app.post("/logout")

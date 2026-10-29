@@ -9,6 +9,15 @@ import MyVoteTab from "./components/tabs/MyVoteTab";
 import * as api from "./api";
 
 const SESSION_STORAGE_KEY = "voter_session_token";
+const VOTE_FEE_STORAGE_KEY = "voter_vote_fee"; // chi tiết phí gas lúc bầu, giữ lại khi F5
+
+function loadSavedVoteFee() {
+  try {
+    return JSON.parse(sessionStorage.getItem(VOTE_FEE_STORAGE_KEY)) || null;
+  } catch {
+    return null;
+  }
+}
 const POLL_INTERVAL_MS = 8000; // tự làm mới trạng thái bầu cử mỗi 8s
 
 export default function App() {
@@ -23,6 +32,10 @@ export default function App() {
   const [candidates, setCandidates] = useState([]); // chỉ {id, name}, KHÔNG có số phiếu
   const [electionActive, setElectionActive] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
+  // Ví do hệ thống giữ hộ — CHỈ ĐỂ XEM, không có API nào sửa được.
+  const [walletAddressShort, setWalletAddressShort] = useState("");
+  const [balanceEth, setBalanceEth] = useState("");
+  const [voteFee, setVoteFee] = useState(loadSavedVoteFee);
 
   const [globalError, setGlobalError] = useState("");
 
@@ -32,6 +45,8 @@ export default function App() {
     try {
       const data = await api.getMe(t);
       setFullName(data.fullName || "");
+      setWalletAddressShort(data.walletAddressShort || "");
+      setBalanceEth(data.balanceEth || "");
       setElectionActive(data.electionActive);
       setHasVoted(data.hasVoted);
       setCandidates(data.candidates);
@@ -82,6 +97,8 @@ export default function App() {
 
   const handleLoggedIn = async (token) => {
     sessionStorage.setItem(SESSION_STORAGE_KEY, token);
+    sessionStorage.removeItem(VOTE_FEE_STORAGE_KEY); // phiên mới, bỏ phí của phiên trước (nếu còn sót)
+    setVoteFee(null);
     setSessionToken(token);
     setView("dashboard");
     await loadMe(token);
@@ -89,7 +106,16 @@ export default function App() {
 
   const handleVote = async (candidateId) => {
     try {
-      await api.castVote(sessionToken, candidateId);
+      const res = await api.castVote(sessionToken, candidateId);
+      const fee = {
+        feeEth: res.feeEth,
+        gasUsed: res.gasUsed,
+        gasPriceGwei: res.gasPriceGwei,
+        balanceBeforeEth: res.balanceBeforeEth,
+        balanceAfterEth: res.balanceAfterEth,
+      };
+      setVoteFee(fee);
+      sessionStorage.setItem(VOTE_FEE_STORAGE_KEY, JSON.stringify(fee));
       await loadMe();
     } catch (err) {
       throw new Error(err.message);
@@ -108,8 +134,12 @@ export default function App() {
       // Dù API lỗi, vẫn đưa người dùng về Landing — phiên phía client coi như kết thúc.
     }
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(VOTE_FEE_STORAGE_KEY);
     setSessionToken(null);
     setFullName("");
+    setWalletAddressShort("");
+    setBalanceEth("");
+    setVoteFee(null);
     setCandidates([]);
     setHasVoted(false);
     setView("landing");
@@ -146,19 +176,28 @@ export default function App() {
 
         {activeTab === "info" && <InformationTab />}
 
-        {activeTab === "account" && <AccountTab fullName={fullName} hasVoted={hasVoted} />}
+        {activeTab === "account" && (
+          <AccountTab
+            fullName={fullName}
+            hasVoted={hasVoted}
+            walletAddressShort={walletAddressShort}
+            balanceEth={balanceEth}
+            voteFee={voteFee}
+          />
+        )}
 
         {activeTab === "voting" && (
           <VotingAreaTab
             candidates={candidates}
             hasVoted={hasVoted}
+            voteFee={voteFee}
             electionActive={electionActive}
             onVote={handleVote}
             onRefresh={() => loadMe()}
           />
         )}
 
-        {activeTab === "myvote" && <MyVoteTab sessionToken={sessionToken} hasVoted={hasVoted} />}
+        {activeTab === "myvote" && <MyVoteTab sessionToken={sessionToken} />}
       </main>
     </div>
   );
