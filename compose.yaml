@@ -65,6 +65,21 @@ services:
       - "3000:80"
     depends_on:
       - api
-      
+
+  ganache:
+    image: trufflesuite/ganache:v7.9.2
+    container_name: blockchain_vote_ganache
+    restart: unless-stopped
+    command:
+      - --server.host=0.0.0.0
+      - --server.port=8545
+      - --chain.chainId=1337
+      - --database.dbPath=/ganache-data
+    ports:
+      - "8545:8545"
+    volumes:
+      - ganache_data:/ganache-data
+
 volumes:
   mysql_data:
+  ganache_data:

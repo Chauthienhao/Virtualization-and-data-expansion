@@ -1,1 +1,42 @@
 # Loại bỏ file không cần thiết khi build image
+
+# Git
+.git
+.gitignore
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Node.js
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+
+# Environment và thông tin nhạy cảm
+.env
+.env.*
+!.env.example
+
+# Tài liệu và file tạm
+docs/
+*.docx
+*.pdf
+*.zip
+*.log
+*.tmp
+
+# Hệ điều hành
+.DS_Store
+Thumbs.db
+
