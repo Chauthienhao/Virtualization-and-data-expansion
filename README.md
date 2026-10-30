@@ -26,20 +26,58 @@ Dự án hệ thống bỏ phiếu trực tuyến sử dụng Blockchain, đư�
 
 **Lưu ý:** Ganache đã chạy trong Docker, không cần mở Ganache Desktop. Container dùng volume `ganache_data` để lưu blockchain.
 
-## 4. Yêu cầu môi trường
+## 4. Cài đặt trên máy Windows mới
 
-- Docker Desktop
-- Docker Compose
-- Git
-- Python và các thư viện trong `requirements.txt` nếu cần deploy hợp đồng từ Windows
+1. Cài [Docker Desktop](https://www.docker.com/products/docker-desktop/) (sử dụng WSL 2 và **Linux containers**), [Git](https://git-scm.com/downloads/win) và [Python 3.11](https://www.python.org/downloads/). Khi cài Python, chọn **Add Python to PATH**.
+2. Khởi động lại Windows nếu được yêu cầu; mở Docker Desktop và đợi Docker Engine chạy.
+3. Mở **PowerShell**, kiểm tra:
 
-## 5. Cấu hình môi trường
+```powershell
+docker --version
+docker compose version
+git --version
+py -3.11 --version
+```
 
-Tạo file `.env` và `.env.docker` dựa trên `.env.example`, sau đó điền các giá trị cấu hình phù hợp.
+Không cần cài riêng MySQL, Node.js hoặc Ganache Desktop.
 
-Một số biến môi trường quan trọng trong **`.env.docker`** (dùng cho container Python):
+## 5. Tải mã nguồn và cấu hình
 
-```env
+### Bước 1: Clone nhánh `bangchau`
+
+Trong PowerShell, chuyển đến thư mục muốn lưu dự án, sau đó chạy:
+
+```powershell
+git clone -b bangchau https://github.com/Chauthienhao/Virtualization-and-data-expansion.git
+cd Virtualization-and-data-expansion
+```
+
+Nếu đã clone nhánh `hao`, dùng `git fetch origin` rồi `git switch -c bangchau --track origin/bangchau` (chỉ khi chưa có nhánh `bangchau` trên máy và đã xử lý các thay đổi chưa lưu).
+
+### Bước 2: Cài thư viện Python
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+Nếu PowerShell chặn kích hoạt `.venv`, chạy `Set-ExecutionPolicy -Scope Process Bypass` rồi kích hoạt lại.
+
+### Bước 3: Tạo `.env` và `.env.docker`
+
+Tạo 2 file .env, .env.docker
+
+```powershell
+# .env.docker
+RPC_URL=http://127.0.0.1:8545
+ADMIN_ACCOUNT_INDEX=0
+ADMIN_PRIVATE_KEY=
+CONTRACT_ADDRESS=<dia_chi_smart_contract_da_deploy>
+```
+
+```powershell
+# .env.docker
 RPC_URL=http://ganache:8545
 CONTRACT_ADDRESS=<dia_chi_smart_contract_da_deploy>
 ADMIN_ACCOUNT_INDEX=0
@@ -50,62 +88,62 @@ DB_PORT=3306
 DB_NAME=election_admin
 ```
 
-Trong **`.env`** (dùng khi chạy `python deploy.py` trực tiếp trên Windows), đặt:
+## 6. Khởi chạy hệ thống (lần đầu)
 
-```env
-RPC_URL=http://127.0.0.1:8545
-ADMIN_ACCOUNT_INDEX=0
-ADMIN_PRIVATE_KEY=
-CONTRACT_ADDRESS=<dia_chi_smart_contract_da_deploy>
-```
+### Bước 4: Chạy Ganache trong Docker
 
-Hai file cần dùng cùng địa chỉ hợp đồng sau khi deploy. Các biến khác giữ theo `.env.example` và cấu hình dự án. `ADMIN_PRIVATE_KEY` để trống khi dùng tài khoản Ganache đã mở khóa theo chỉ số `ADMIN_ACCOUNT_INDEX`.
-
-Các biến khác như mật khẩu MySQL, khóa mã hóa và thông tin tài khoản blockchain cần được cấu hình đầy đủ theo yêu cầu ứng dụng.
-
-**Không commit `.env`, `.env.docker`, mật khẩu hoặc private key lên GitHub.**
-
-## 6. Khởi chạy hệ thống
-
-### Bước 1: Khởi động Ganache Docker và deploy hợp đồng lần đầu
-
-Chạy Ganache Docker trước:
-
-```bash
+```powershell
 docker compose --env-file .env.docker up -d ganache
 ```
 
-Với lần cài mới, đảm bảo `.env` trỏ tới `http://127.0.0.1:8545` và chạy trên Windows (Python đã cài các thư viện trong `requirements.txt`):
+Kiểm tra blockchain:
 
-```bash
+```powershell
+python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); print('Connected:',w.is_connected()); print('Chain ID:',w.eth.chain_id)"
+```
+
+Kết quả cần có `Connected: True` và `Chain ID: 1337`.
+
+### Bước 5: Deploy Smart Contract
+
+Kiểm tra số dư ETH thử nghiệm của tài khoản Admin:
+
+```powershell
+python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); a=w.eth.accounts[0]; print('Admin:',a); print('ETH:',w.from_wei(w.eth.get_balance(a),'ether'))"
+```
+
+Nếu tài khoản có **0 ETH**, cấp 100 ETH thử nghiệm trên **Ganache local**:
+
+```powershell
+python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); a=w.eth.accounts[0]; print(w.provider.make_request('evm_setAccountBalance',[a,hex(w.to_wei(100,'ether'))]))"
+```
+
+Sau đó deploy:
+
+```powershell
 python deploy.py
 ```
 
-Lệnh deploy biên dịch `Election.sol`, cập nhật `ElectionABI.json` và in ra địa chỉ hợp đồng mới. Chép địa chỉ này vào `CONTRACT_ADDRESS` trong **cả** `.env` và `.env.docker`.
+Sao chép địa chỉ hợp đồng vừa tạo vào `CONTRACT_ADDRESS` của **cả `.env` và `.env.docker`**. Mỗi máy có Ganache riêng nên không dùng địa chỉ hợp đồng từ máy khác. Nếu `deploy.py` cập nhật `ElectionABI.json`, bước build tiếp theo sẽ đưa ABI mới vào image.
 
-**Kiểm tra quyền Admin:** tài khoản dùng deploy phải trùng với tài khoản Admin của ứng dụng. Nếu dùng `ADMIN_ACCOUNT_INDEX=0`, không cấu hình `ADMIN_PRIVATE_KEY` khác. Nếu Ganache báo `insufficient funds for gas * price + value`, kiểm tra số dư ETH thử nghiệm của tài khoản; không chạy deploy lặp lại khi chưa xử lý lỗi.
+### Bước 6: Build và chạy 5 container
 
-**Chỉ cần deploy lại** khi hợp đồng chưa tồn tại trên chain, chain bị reset hoặc cần triển khai phiên bản Solidity mới. Khởi động lại Docker thông thường không yêu cầu deploy lại.
-
-### Bước 2: Build và chạy Docker
-
-Mở terminal tại thư mục dự án:
-
-```bash
+```powershell
 docker compose --env-file .env.docker up -d --build
-```
-
-### Bước 3: Kiểm tra container
-
-```bash
 docker compose --env-file .env.docker ps
 ```
 
-### Bước 4: Truy cập ứng dụng
+Cần thấy đủ `db` (**healthy**), `ganache`, `admin`, `api`, `frontend` ở trạng thái **Up**. Lần đầu Docker cần tải image nên có thể mất vài phút.
 
-- React Frontend: http://localhost:3000
-- FastAPI Swagger: http://localhost:8001/docs
-- Gradio Admin: http://localhost:7861
+### Bước 7: Mở 3 trang để kiểm tra
+
+- **Frontend:** http://localhost:3000
+- **FastAPI Swagger:** http://localhost:8001/docs
+- **Gradio Admin:** http://localhost:7861
+
+Nếu cả ba trang mở được, vào Admin kiểm tra thông báo blockchain đã kết nối và tài khoản đang dùng là Admin của hợp đồng. Đây mới là kiểm tra khởi động; nghiệp vụ bỏ phiếu cần được kiểm thử riêng.
+
+**Nếu có lỗi:** xem log bằng `docker compose --env-file .env.docker logs --tail=100` và kiểm tra lại `.env.docker`, `CONTRACT_ADDRESS` cùng trạng thái Docker Desktop. Các lần chạy sau chỉ cần mở Docker Desktop rồi dùng `docker compose --env-file .env.docker up -d`; không cần deploy lại nếu blockchain và hợp đồng vẫn còn.
 
 ## 7. Các lệnh Docker thường dùng
 
