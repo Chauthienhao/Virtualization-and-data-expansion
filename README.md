@@ -206,3 +206,4 @@ Sau đó mở lại Admin để xác nhận kết nối và hợp đồng vẫn 
 - `.dockerignore` loại trừ `.venv`, `node_modules`, file môi trường và tài liệu không cần thiết để giảm build context.
 - Khi thay đổi `ElectionABI.json`, cần build lại image Python để container nhận ABI mới.
 - Cấu hình hiện tại phục vụ mục đích phát triển và kiểm thử đồ án, chưa phải cấu hình production.
+- Máy chạy thử nên có cấu hình từ 16GB RAM trở lên nếu không sẽ đứng máy
