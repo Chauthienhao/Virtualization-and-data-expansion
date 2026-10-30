@@ -69,7 +69,7 @@ Nếu PowerShell chặn kích hoạt `.venv`, chạy `Set-ExecutionPolicy -Scope
 Tạo 2 file .env, .env.docker
 
 ```powershell
-# .env.docker
+# .env
 RPC_URL=http://127.0.0.1:8545
 ADMIN_ACCOUNT_INDEX=0
 ADMIN_PRIVATE_KEY=
@@ -118,10 +118,20 @@ Nếu tài khoản có **0 ETH**, cấp 100 ETH thử nghiệm trên **Ganache l
 python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); a=w.eth.accounts[0]; print(w.provider.make_request('evm_setAccountBalance',[a,hex(w.to_wei(100,'ether'))]))"
 ```
 
+Nếu lỗi, bị chặn:
+```powershell
+docker compose --env-file .env.docker exec admin python -c "from web3 import Web3; import os; w=Web3(Web3.HTTPProvider(os.environ['RPC_URL'])); a=w.eth.accounts[0]; print(w.provider.make_request('evm_setAccountBalance',[a,hex(w.to_wei(100,'ether'))])); print('Account:',a); print('Balance:',w.from_wei(w.eth.get_balance(a),'ether'),'ETH')"
+```
+
 Sau đó deploy:
 
 ```powershell
 python deploy.py
+```
+
+Nếu bị chặn:
+```powershell
+docker compose --env-file .env.docker exec admin python deploy.py
 ```
 
 Sao chép địa chỉ hợp đồng vừa tạo vào `CONTRACT_ADDRESS` của **cả `.env` và `.env.docker`**. Mỗi máy có Ganache riêng nên không dùng địa chỉ hợp đồng từ máy khác. Nếu `deploy.py` cập nhật `ElectionABI.json`, bước build tiếp theo sẽ đưa ABI mới vào image.
