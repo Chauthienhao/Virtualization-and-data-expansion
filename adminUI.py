@@ -985,6 +985,8 @@ with gr.Blocks(title="Cổng Quản Trị Hệ Thống Bầu Cử") as admin_app
     dashboard_outputs = [dash_header, results_chart, results_table]
     dash_refresh_btn.click(fn=on_check_connection, inputs=[], outputs=[dash_status, *dashboard_outputs])
     admin_app.load(fn=on_check_connection, inputs=[], outputs=[dash_status, *dashboard_outputs])
+    admin_app.load(fn=lambda: pd.DataFrame(_get_elections_table(), columns=ELECTION_COLS),
+                   inputs=[], outputs=[elections_table])
     dash_timer.tick(fn=on_dashboard_tick, inputs=[], outputs=dashboard_outputs, show_progress="hidden")
 
     # 1. Thêm ứng viên vào bảng tạm

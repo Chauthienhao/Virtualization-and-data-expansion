@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Hòm phiếu và chuỗi khối blockchain">
+  <!-- quầng sáng nền -->
+  <circle cx="160" cy="175" r="135" fill="#ffffff" opacity="0.14"/>
+
+  <!-- dây nối giữa các khối (vẽ trước để nằm dưới khối) -->
+  <g stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 9" opacity="0.9">
+    <line x1="61" y1="79" x2="107" y2="24"/>
+    <line x1="107" y1="24" x2="213" y2="24"/>
+    <line x1="213" y1="24" x2="259" y2="79"/>
+  </g>
+
+  <!-- chuỗi khối -->
+  <g stroke="#0b6e85" stroke-width="3">
+    <rect x="44" y="62" width="34" height="34" rx="7" fill="#ffffff"/>
+    <rect x="90" y="7" width="34" height="34" rx="7" fill="#ffffff"/>
+    <rect x="196" y="7" width="34" height="34" rx="7" fill="#ffffff"/>
+    <!-- khối mới nhất: tô vàng -->
+    <rect x="242" y="62" width="34" height="34" rx="7" fill="#fde047"/>
+  </g>
+  <g stroke="#0b6e85" stroke-width="2.5" stroke-linecap="round">
+    <path d="M53 74h16M53 84h10"/>
+    <path d="M99 19h16M99 29h10"/>
+    <path d="M205 19h16M205 29h10"/>
+    <path d="M251 74h16M251 84h10"/>
+  </g>
+
+  <!-- bóng đổ -->
+  <ellipse cx="165" cy="294" rx="108" ry="10" fill="#0b6e85" opacity="0.28"/>
+
+  <!-- hòm phiếu: nắp, mặt bên, mặt trước -->
+  <polygon points="66,170 250,170 274,148 90,148" fill="#e6fbff" stroke="#0b6e85" stroke-width="3" stroke-linejoin="round"/>
+  <polygon points="250,170 274,148 274,262 250,286" fill="#bdeef8" stroke="#0b6e85" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="66" y="170" width="184" height="116" rx="4" fill="#ffffff" stroke="#0b6e85" stroke-width="3"/>
+
+  <defs><clipPath id="aboveSlot"><rect x="0" y="0" width="320" height="160"/></clipPath></defs>
+  <!-- lá phiếu -->
+  <g clip-path="url(#aboveSlot)"><g transform="translate(0 6) rotate(-7 160 120)">
+    <rect x="126" y="76" width="68" height="88" rx="7" fill="#ffffff" stroke="#0b6e85" stroke-width="3"/>
+    <rect x="138" y="90" width="16" height="16" rx="3" fill="none" stroke="#0b6e85" stroke-width="2.5"/>
+    <path d="M141 98l4 4 8-10" fill="none" stroke="#16a34a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M160 96h22M160 103h14" stroke="#0b6e85" stroke-width="2.5" stroke-linecap="round"/>
+    <rect x="138" y="116" width="16" height="16" rx="3" fill="none" stroke="#0b6e85" stroke-width="2.5"/>
+    <path d="M160 122h22M160 129h14" stroke="#0b6e85" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+  </g></g>
+
+  <!-- khe bỏ phiếu (đè lên mép dưới lá phiếu) -->
+  <path d="M118 160h96" stroke="#0b6e85" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- nhãn trên hòm -->
+  <rect x="98" y="206" width="120" height="46" rx="10" fill="#0b6e85"/>
+  <circle cx="124" cy="229" r="12" fill="#fde047"/>
+  <path d="M118 229l4 4 8-9" fill="none" stroke="#0b6e85" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="178" y="236" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700" fill="#ffffff" letter-spacing="1.5">VOTE</text>
+</svg>
