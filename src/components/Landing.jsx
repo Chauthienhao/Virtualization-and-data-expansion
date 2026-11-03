@@ -1,4 +1,5 @@
 import React from "react";
+import votingHero from "../assets/voting-hero.svg";
 
 export default function Landing({ onNavigate }) {
   return (
@@ -8,7 +9,7 @@ export default function Landing({ onNavigate }) {
         <div className="w-full md:w-1/2 flex justify-center mb-8 md:mb-0">
           <div className="relative w-80 h-80 flex items-center justify-center">
             <img
-              src="https://illustrations.popsy.co/cyan/surveillance.svg"
+              src={votingHero}
               alt="Voting Illustration"
               className="w-full object-contain drop-shadow-xl"
             />
