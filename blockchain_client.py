@@ -35,6 +35,20 @@ except ImportError:
     pass
 
 
+def add_poa_middleware(w3: Web3) -> Web3:
+    """Mạng Besu QBFT/IBFT (PoA) ghi chữ ký validator vào extraData của block,
+    dài hơn 32 byte chuẩn Ethereum, nên web3.py báo ExtraDataLengthError khi
+    đọc block (get_block, tự tính phí gas...). Middleware này cắt bớt
+    extraData cho web3.py đọc được. Vô hại với Ganache/mạng thường."""
+    try:
+        from web3.middleware import ExtraDataToPOAMiddleware  # web3 >= 7
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    except ImportError:
+        from web3.middleware import geth_poa_middleware  # web3 6.x
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    return w3
+
+
 class ElectionError(Exception):
     """Lỗi nghiệp vụ/kết nối đã được diễn giải sang tiếng Việt dễ hiểu,
     để lớp giao diện (Gradio) chỉ cần hiển thị str(e) cho người dùng."""
@@ -121,6 +135,7 @@ class ElectionClient:
 
         # --- Kết nối RPC ---
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": 10}))
+        add_poa_middleware(self.w3)
         if not self.w3.is_connected():
             raise ElectionError(
                 f"Không kết nối được tới node blockchain tại {self.rpc_url}. "
