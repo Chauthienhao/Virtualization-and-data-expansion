@@ -78,6 +78,8 @@ def deploy(abi, bytecode):
     print("[3/4] Kết nối blockchain và gửi giao dịch deploy...")
     rpc_url = os.getenv("RPC_URL", "http://127.0.0.1:7545")
     w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 10}))
+    from blockchain_client import add_poa_middleware
+    add_poa_middleware(w3)  # cần cho Besu QBFT, vô hại với Ganache
     if not w3.is_connected():
         sys.exit(f"❌ Không kết nối được tới {rpc_url}. Hãy khởi động Ganache trước rồi chạy lại.")
 

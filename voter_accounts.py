@@ -136,6 +136,8 @@ def fund_wallet(client, address: str, amount_eth: float = 0.01):
             tx["nonce"] = client.w3.eth.get_transaction_count(client.account, "pending")
             tx["chainId"] = client.w3.eth.chain_id
             tx["gas"] = 21000
+            # Ký tay thì phải tự điền giá gas (Besu với zeroBaseFee/min-gas-price=0 trả về 0).
+            tx["gasPrice"] = client.w3.eth.gas_price
             signed = client.w3.eth.account.sign_transaction(tx, private_key=client.private_key)
             raw = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction")
             tx_hash = client.w3.eth.send_raw_transaction(raw)

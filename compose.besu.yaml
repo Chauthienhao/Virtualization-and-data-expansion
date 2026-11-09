@@ -1,0 +1,100 @@
+# ==============================================================================
+# 4 node Hyperledger Besu (QBFT) chay trong Docker.
+#
+# Truoc khi chay: powershell -ExecutionPolicy Bypass -File besu\generate.ps1
+#   (sinh genesis + khoa node + static-nodes.docker.json vao besu/generated/)
+# Nho TAT 4 node dang chay tren Windows truoc (trung port 8545..8548).
+#
+# Chay rieng Besu:        docker compose -f compose.besu.yaml up -d
+# Gop voi app (nhanh co compose.yaml):
+#                         docker compose -f compose.yaml -f compose.besu.yaml up -d
+#   -> container trong cung network goi RPC qua: http://besu-node1:8545
+#   -> tu may Windows goi qua:                  http://127.0.0.1:8545
+#
+# Tat, giu du lieu chain:  docker compose -f compose.besu.yaml down
+# Xoa sach chain:          docker compose -f compose.besu.yaml down -v
+#   (bat buoc khi chay lai generate.ps1, vi genesis moi khong khop chain cu)
+# ==============================================================================
+
+x-besu-node: &besu-node
+  image: hyperledger/besu:26.11.0
+  restart: unless-stopped
+  user: root
+  environment:
+    - BESU_OPTS=-Xmx512m          # gioi han RAM moi node
+  command:
+    - --data-path=/opt/besu/data
+    - --genesis-file=/config/genesis.json
+    - --node-private-key-file=/config/node/key
+    - --static-nodes-file=/config/static-nodes.json
+    - --p2p-port=30303
+    - --rpc-http-enabled
+    - --rpc-http-host=0.0.0.0
+    - --rpc-http-port=8545
+    - --rpc-http-api=ETH,NET,WEB3,QBFT,ADMIN,TXPOOL
+    - --rpc-http-cors-origins=*
+    - --host-allowlist=*          # cho phep goi bang ten service (besu-node1)
+    - --min-gas-price=0
+
+services:
+  besu-node1:
+    <<: *besu-node
+    container_name: besu-node1
+    ports: ["8545:8545"]
+    volumes:
+      - ./besu/generated/genesis.json:/config/genesis.json:ro
+      - ./besu/generated/static-nodes.docker.json:/config/static-nodes.json:ro
+      - ./besu/generated/node1:/config/node:ro
+      - besu-data-1:/opt/besu/data
+    networks:
+      default: { ipv4_address: 172.16.239.11 }
+
+  besu-node2:
+    <<: *besu-node
+    container_name: besu-node2
+    ports: ["8546:8545"]
+    volumes:
+      - ./besu/generated/genesis.json:/config/genesis.json:ro
+      - ./besu/generated/static-nodes.docker.json:/config/static-nodes.json:ro
+      - ./besu/generated/node2:/config/node:ro
+      - besu-data-2:/opt/besu/data
+    networks:
+      default: { ipv4_address: 172.16.239.12 }
+
+  besu-node3:
+    <<: *besu-node
+    container_name: besu-node3
+    ports: ["8547:8545"]
+    volumes:
+      - ./besu/generated/genesis.json:/config/genesis.json:ro
+      - ./besu/generated/static-nodes.docker.json:/config/static-nodes.json:ro
+      - ./besu/generated/node3:/config/node:ro
+      - besu-data-3:/opt/besu/data
+    networks:
+      default: { ipv4_address: 172.16.239.13 }
+
+  besu-node4:
+    <<: *besu-node
+    container_name: besu-node4
+    ports: ["8548:8545"]
+    volumes:
+      - ./besu/generated/genesis.json:/config/genesis.json:ro
+      - ./besu/generated/static-nodes.docker.json:/config/static-nodes.json:ro
+      - ./besu/generated/node4:/config/node:ro
+      - besu-data-4:/opt/besu/data
+    networks:
+      default: { ipv4_address: 172.16.239.14 }
+
+# Dat dai IP cho network mac dinh: khi gop voi compose.yaml, cac service
+# admin/api/db cua app cung nam trong network nay, goi duoc besu-node1.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.16.239.0/24
+
+volumes:
+  besu-data-1:
+  besu-data-2:
+  besu-data-3:
+  besu-data-4:
