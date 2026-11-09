@@ -12,3 +12,7 @@ dist/
 .env.*
 !.env.example
 !.env.docker.example
+
+# Besu (chứa khóa, không commit)
+besu/generated/
+besu/data/

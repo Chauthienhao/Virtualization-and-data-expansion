@@ -1,4 +1,4 @@
-# Khai báo và kết nối 4 container
+# Cấu hình và kết nối 5 container
 
 services:
   db:
@@ -75,6 +75,7 @@ services:
       - --server.port=8545
       - --chain.chainId=1337
       - --database.dbPath=/ganache-data
+      - --wallet.mnemonic=test test test test test test test test test test test junk
     ports:
       - "8545:8545"
     volumes:
