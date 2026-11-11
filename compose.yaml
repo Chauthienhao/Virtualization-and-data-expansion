@@ -67,6 +67,7 @@ services:
       - api
 
   ganache:
+    profiles: ["ganache"] # chỉ chạy khi gọi --profile ganache
     image: trufflesuite/ganache:v7.9.2
     container_name: blockchain_vote_ganache
     restart: unless-stopped

@@ -1,219 +1,276 @@
-# Blockchain Vote Online – Docker Deployment
+# Blockchain Vote Online — Hướng dẫn Docker (Hyperledger Besu QBFT)
 
-## 1. Giới thiệu
+Hệ thống bỏ phiếu trực tuyến gồm React/Vite (cử tri), FastAPI, Gradio (quản trị), MySQL 8.4 và mạng blockchain riêng **Hyperledger Besu QBFT gồm 4 validator**. Docker Compose chạy **8 container**. Ganache là cấu hình thử nghiệm cũ, không khởi chạy mặc định.
 
-Dự án hệ thống bỏ phiếu trực tuyến sử dụng Blockchain, được triển khai bằng Docker Compose nhằm đóng gói các thành phần ứng dụng và hỗ trợ triển khai trên nhiều môi trường.
+> Tài liệu dành cho **Windows 10/11 + PowerShell + Docker Desktop (Linux containers)**.
 
-## 2. Công nghệ sử dụng
+## 1. Kiến trúc và cổng
 
-- **Frontend:** React, Vite, Tailwind CSS
-- **Backend API:** Python, FastAPI
-- **Admin:** Python, Gradio
-- **Database:** MySQL 8.4
-- **Blockchain:** Ethereum Smart Contract (Solidity), Ganache
-- **Containerization:** Docker, Docker Compose
-- **Web Server:** Nginx
-
-## 3. Các thành phần Docker
-
-| Service | Chức năng | Cổng truy cập |
+| Service | Chức năng | Địa chỉ trên máy Windows |
 |---|---|---|
-| frontend | Giao diện cử tri (React + Nginx) | 3000 |
-| api | Backend FastAPI | 8001 |
-| admin | Giao diện quản trị Gradio | 7861 |
-| db | Cơ sở dữ liệu MySQL | Nội bộ Docker |
-| ganache | Blockchain thử nghiệm Ethereum (Ganache CLI) | 8545 |
+| `frontend` | React qua Nginx | http://localhost:3000 |
+| `api` | FastAPI, Swagger | http://localhost:8001/docs |
+| `admin` | Gradio Admin | http://localhost:7861 |
+| `db` | MySQL 8.4, dữ liệu ngoài blockchain | Chỉ nội bộ Docker (`db:3306`) |
+| `besu-node1` | Validator QBFT, RPC cho ứng dụng | http://localhost:8545 |
+| `besu-node2` | Validator QBFT | http://localhost:8546 |
+| `besu-node3` | Validator QBFT | http://localhost:8547 |
+| `besu-node4` | Validator QBFT | http://localhost:8548 |
 
-**Lưu ý:** Ganache đã chạy trong Docker, không cần mở Ganache Desktop. Container dùng volume `ganache_data` để lưu blockchain.
+Các container ứng dụng gọi Besu qua `http://besu-node1:8545` và MySQL qua `db:3306`. Frontend chạy trong **trình duyệt Windows** nên gọi API qua `http://127.0.0.1:8001` (cấu hình build hiện tại). Bốn validator cùng nằm trên **một máy Docker**, chưa phải mô hình chịu lỗi khi mất cả máy chủ.
 
-## 4. Cài đặt trên máy Windows mới
+## 2. Chuẩn bị máy chưa cài Docker
 
-1. Cài [Docker Desktop](https://www.docker.com/products/docker-desktop/) (sử dụng WSL 2 và **Linux containers**), [Git](https://git-scm.com/downloads/win) và [Python 3.11](https://www.python.org/downloads/). Khi cài Python, chọn **Add Python to PATH**.
-2. Khởi động lại Windows nếu được yêu cầu; mở Docker Desktop và đợi Docker Engine chạy.
-3. Mở **PowerShell**, kiểm tra:
+1. Máy Windows 10/11 hỗ trợ ảo hóa; bật **Virtualization** trong BIOS/UEFI nếu đang tắt. Nên có **16 GB RAM máy vật lý** để chạy Docker Desktop và các ứng dụng khác; tài nguyên thực tế cần đo thêm.
+2. Mở **PowerShell bằng quyền Administrator**, cài WSL nếu chưa có:
+   ```powershell
+   wsl --install
+   ```
+   Khởi động lại Windows khi được yêu cầu. Kiểm tra `wsl --status` và `wsl -l -v`. Nếu hệ thống đã có WSL 2 thì không cần cài lại.
+3. Cài [Docker Desktop](https://www.docker.com/products/docker-desktop/). Trong **Settings → General**, bật **Use the WSL 2 based engine**; bảo đảm Docker đang ở **Linux containers**. Mở Docker Desktop và đợi Engine chạy.
+4. Cài [Git for Windows](https://git-scm.com/downloads/win) và [Python 3.11](https://www.python.org/downloads/) (đánh dấu **Add Python to PATH** nếu trình cài đặt có tùy chọn). Python dùng để sinh khóa Admin; ứng dụng Python thực tế chạy trong container.
+5. Kiểm tra trong PowerShell:
+   ```powershell
+   wsl --status
+   docker --version
+   docker compose version
+   docker info --format '{{.OSType}}'
+   git --version
+   py -3.11 --version
+   ```
+   `docker info` phải trả về `linux`. Không cần cài MySQL, Node.js, Nginx hoặc Besu trực tiếp trên Windows.
 
-```powershell
-docker --version
-docker compose version
-git --version
-py -3.11 --version
-```
-
-Không cần cài riêng MySQL, Node.js hoặc Ganache Desktop.
-
-## 5. Tải mã nguồn và cấu hình
-
-### Bước 1: Clone nhánh `bangchau`
-
-Trong PowerShell, chuyển đến thư mục muốn lưu dự án, sau đó chạy:
+## 3. Tải mã nguồn
 
 ```powershell
 git clone -b bangchau https://github.com/Chauthienhao/Virtualization-and-data-expansion.git
 cd Virtualization-and-data-expansion
 ```
 
-Nếu đã clone nhánh `hao`, dùng `git fetch origin` rồi `git switch -c bangchau --track origin/bangchau` (chỉ khi chưa có nhánh `bangchau` trên máy và đã xử lý các thay đổi chưa lưu).
 
-### Bước 2: Cài thư viện Python
+## 4. Tạo môi trường và khóa bí mật — chỉ làm lần đầu
+
+### 4.1. Python để chạy script sinh khóa
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install eth-account
+python -c "from eth_account import Account; print('eth-account OK')"
 ```
 
-Nếu PowerShell chặn kích hoạt `.venv`, chạy `Set-ExecutionPolicy -Scope Process Bypass` rồi kích hoạt lại.
-
-### Bước 3: Tạo `.env` và `.env.docker`
-
-Tạo 2 file .env, .env.docker
+Nếu PowerShell chặn kích hoạt `.venv`:
 
 ```powershell
-# .env
-RPC_URL=http://127.0.0.1:8545
-ADMIN_ACCOUNT_INDEX=0
-ADMIN_PRIVATE_KEY=
-CONTRACT_ADDRESS=<dia_chi_smart_contract_da_deploy>
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1
 ```
 
+### 4.2. Sinh genesis QBFT và khóa 4 validator
+
+**Cảnh báo:** `besu/generate.ps1` hiện tại **xóa `besu/generated/` và `besu/data/` mỗi lần chạy**. Chỉ chạy trên máy mới, trước khi có dữ liệu cần giữ. Không chạy lại khi mạng đã hoạt động.
+
+Tải image Besu và tạo hàm `besu` trong **cùng cửa sổ PowerShell**. Hàm mount cố định thư mục `besu/` vì script tự chuyển vào thư mục này:
+
 ```powershell
-# .env.docker
-RPC_URL=http://ganache:8545
-CONTRACT_ADDRESS=<dia_chi_smart_contract_da_deploy>
-ADMIN_ACCOUNT_INDEX=0
-ADMIN_PRIVATE_KEY=
+docker pull hyperledger/besu:26.11.0
+$BesuDir = (Resolve-Path .\besu).Path
+function besu {
+    docker run --rm -v "${BesuDir}:/w" -w /w hyperledger/besu:26.11.0 @args
+}
+besu --version
+& .\besu\generate.ps1
+```
+
+Nếu script hoàn tất, kiểm tra:
+
+```powershell
+Test-Path .\besu\generated\genesis.json
+Test-Path .\besu\generated\static-nodes.docker.json
+Get-ChildItem .\besu\generated\node* -Directory
+```
+
+Phải có `genesis.json`, `static-nodes.docker.json` và 4 thư mục `node1`–`node4`.
+
+**Lưu ý lỗi đã gặp với script hiện tại:** Besu có thể báo `Output directory already exists` ở bước `generate-blockchain-config`, dù đã tạo `generated/networkFiles/genesis.json` và 4 thư mục khóa. Nếu gặp lỗi, **không chạy lại toàn bộ script**. Kiểm tra `besu/generated/networkFiles/keys` có đúng 4 thư mục, sau đó hoàn tất phần chia khóa bằng đoạn sau (chạy từ thư mục gốc):
+
+```powershell
+Push-Location .\besu
+$OUT = 'generated'
+$dirs = @(Get-ChildItem "$OUT/networkFiles/keys" -Directory | Sort-Object Name)
+if ($dirs.Count -ne 4) { Pop-Location; throw 'Khong du 4 khoa validator; dung lai de kiem tra.' }
+$enodes = @(); $enodesDocker = @(); $i = 1
+foreach ($d in $dirs) {
+    $nodeDir = "$OUT/node$i"
+    New-Item -ItemType Directory $nodeDir -Force | Out-Null
+    Copy-Item "$($d.FullName)/key", "$($d.FullName)/key.pub" $nodeDir -Force
+    $pub = (Get-Content "$($d.FullName)/key.pub" -Raw).Trim() -replace '^0x', ''
+    $port = 30302 + $i
+    $enodes += "`"enode://$pub@127.0.0.1:$port`""
+    $enodesDocker += "`"enode://$pub@172.16.239.1$($i):30303`""
+    $i++
+}
+Copy-Item "$OUT/networkFiles/genesis.json" "$OUT/genesis.json" -Force
+'[' + ($enodes -join ',') + ']' | Set-Content "$OUT/static-nodes.json" -Encoding ascii
+'[' + ($enodesDocker -join ',') + ']' | Set-Content "$OUT/static-nodes.docker.json" -Encoding ascii
+Pop-Location
+```
+
+Nếu không có đủ 4 bộ khóa, cần kiểm tra lỗi trước khi tiếp tục. **Không xóa volume blockchain đang sử dụng để thử lại.**
+
+### 4.3. Tạo `.env.docker`
+
+Nếu repository có `.env.docker.example`:
+
+```powershell
+Copy-Item .env.docker.example .env.docker
+notepad .env.docker
+```
+
+Điền các biến tối thiểu sau (giữ những biến khác trong file mẫu):
+
+```dotenv
+DOCKER_DB_ROOT_PASSWORD=DAT_MAT_KHAU_MYSQL_MANH
+RPC_URL=http://besu-node1:8545
+ADMIN_PRIVATE_KEY=DAN_KHOA_TRONG_besu/generated/admin_private_key.txt
+CONTRACT_ADDRESS=
 ABI_PATH=ElectionABI.json
 DB_HOST=db
 DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=DAT_CUNG_MAT_KHAU_MYSQL_O_TREN
 DB_NAME=election_admin
+GRADIO_SERVER_NAME=0.0.0.0
+VOTER_KEY_ENCRYPTION_KEY=KHOA_FERNET_DUOC_SINH_RIENG
+CCCD_HASH_PEPPER=CHUOI_BI_MAT_NGAU_NHIEN
+VOTER_FUNDING_AMOUNT_ETH=0.01
 ```
 
-## 6. Khởi chạy hệ thống (lần đầu)
+- Đọc `besu/generated/admin_private_key.txt` bằng Notepad và dán vào `ADMIN_PRIVATE_KEY`. **Không gửi/commit private key.**
+- Sinh khóa Fernet (chỉ **một lần**, giữ nguyên nếu đã có dữ liệu cử tri):
+  ```powershell
+  python -m pip install cryptography
+  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  ```
+- `DB_PASSWORD` và `DOCKER_DB_ROOT_PASSWORD` phải thống nhất cho máy mới.
+- `CONTRACT_ADDRESS` **để trống** trước khi deploy.
+- Không sử dụng khóa bí mật mẫu hoặc khóa từ máy khác. File `.env.docker` phải được `.gitignore` loại trừ.
 
-### Bước 4: Chạy Ganache trong Docker
+> **Không cần tạo `.env` để chạy hoàn toàn bằng Docker** theo hướng dẫn này. `.env` chỉ phục vụ các tác vụ chạy Python trực tiếp trên Windows nếu có nhu cầu riêng.
+
+## 5. Khởi chạy lần đầu
+
+Tất cả lệnh sau chạy tại thư mục gốc dự án:
 
 ```powershell
-docker compose --env-file .env.docker up -d ganache
+# Kiểm tra cú pháp và biến môi trường
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml config --quiet
+
+# Khởi động 4 validator
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml up -d besu-node1 besu-node2 besu-node3 besu-node4
+
+# Kiểm tra trạng thái
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml ps
 ```
 
-Kiểm tra blockchain:
+Đợi 4 node báo `healthy`. Kiểm tra số block:
 
 ```powershell
-python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); print('Connected:',w.is_connected()); print('Chain ID:',w.eth.chain_id)"
+$body = @{ jsonrpc='2.0'; method='eth_blockNumber'; params=@(); id=1 } | ConvertTo-Json -Compress
+Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body $body
 ```
 
-Kết quả cần có `Connected: True` và `Chain ID: 1337`.
+Nếu `result` có dạng `0x...` và tăng khi gọi lại, blockchain đang tạo block.
 
-### Bước 5: Deploy Smart Contract
-
-Kiểm tra số dư ETH thử nghiệm của tài khoản Admin:
+### Deploy Smart Contract
 
 ```powershell
-python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); a=w.eth.accounts[0]; print('Admin:',a); print('ETH:',w.from_wei(w.eth.get_balance(a),'ether'))"
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml run --rm --build admin python deploy.py
 ```
 
-Nếu tài khoản có **0 ETH**, cấp 100 ETH thử nghiệm trên **Ganache local**:
+Lệnh build image Python, biên dịch `Election.sol`, cập nhật ABI và deploy contract. **Sao chép địa chỉ `CONTRACT_ADDRESS=0x...` vừa in ra** vào `.env.docker` (không dùng địa chỉ từ mạng Ganache hoặc máy khác).
+
+### Khởi động đủ 8 container
 
 ```powershell
-python -c "from web3 import Web3; w=Web3(Web3.HTTPProvider('http://127.0.0.1:8545')); a=w.eth.accounts[0]; print(w.provider.make_request('evm_setAccountBalance',[a,hex(w.to_wei(100,'ether'))]))"
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml up -d --build --force-recreate
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml ps
 ```
 
-Nếu lệnh trên bị lỗi, bị chặn thì dùng lệnh sau:
-```powershell
-docker compose --env-file .env.docker exec admin python -c "from web3 import Web3; import os; w=Web3(Web3.HTTPProvider(os.environ['RPC_URL'])); a=w.eth.accounts[0]; print(w.provider.make_request('evm_setAccountBalance',[a,hex(w.to_wei(100,'ether'))])); print('Account:',a); print('Balance:',w.from_wei(w.eth.get_balance(a),'ether'),'ETH')"
-```
+Mong đợi `db` và 4 node Besu `healthy`; `admin`, `api`, `frontend` ở trạng thái `Up`.
 
-Sau đó deploy:
+Mở:
 
-```powershell
-python deploy.py
-```
+- **Cử tri:** http://localhost:3000
+- **Swagger API:** http://localhost:8001/docs
+- **Quản trị:** http://localhost:7861
 
-Nếu lệnh trên bị chặn thì dùng lệnh sau:
-```powershell
-docker compose --env-file .env.docker exec admin python deploy.py
-```
+Thử tạo cuộc bầu cử mới, đăng ký cử tri, bỏ 1 phiếu và xem kết quả trong Admin. Giao diện mở được **chưa đủ** để khẳng định nghiệp vụ hoạt động.
 
-Sao chép địa chỉ hợp đồng vừa tạo vào `CONTRACT_ADDRESS` của **cả `.env` và `.env.docker`**. Mỗi máy có Ganache riêng nên không dùng địa chỉ hợp đồng từ máy khác. Nếu `deploy.py` cập nhật `ElectionABI.json`, bước build tiếp theo sẽ đưa ABI mới vào image.
+## 6. Những lần chạy sau — không sinh lại khóa, không deploy lại
 
-### Bước 6: Build và chạy 5 container
+Mở Docker Desktop, đợi Engine chạy, vào thư mục dự án rồi chạy:
 
 ```powershell
-docker compose --env-file .env.docker up -d --build
-docker compose --env-file .env.docker ps
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml up -d
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml ps
 ```
 
-Cần thấy đủ `db` (**healthy**), `ganache`, `admin`, `api`, `frontend` ở trạng thái **Up**. Lần đầu Docker cần tải image nên có thể mất vài phút.
+**Không chạy lại `generate.ps1`, không xóa volume và không deploy lại contract** nếu mạng Besu và địa chỉ hợp đồng hiện tại vẫn còn hoạt động.
 
-### Bước 7: Mở 3 trang để kiểm tra
+## 7. Lệnh quản trị Docker
 
-- **Frontend:** http://localhost:3000
-- **FastAPI Swagger:** http://localhost:8001/docs
-- **Gradio Admin:** http://localhost:7861
+```powershell
+# Xem trạng thái
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml ps
 
-Nếu cả ba trang mở được, vào Admin kiểm tra thông báo blockchain đã kết nối và tài khoản đang dùng là Admin của hợp đồng. Đây mới là kiểm tra khởi động; nghiệp vụ bỏ phiếu cần được kiểm thử riêng.
+# Xem 100 dòng log mới nhất
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml logs --tail=100
 
-**Nếu có lỗi:** xem log bằng `docker compose --env-file .env.docker logs --tail=100` và kiểm tra lại `.env.docker`, `CONTRACT_ADDRESS` cùng trạng thái Docker Desktop. Các lần chạy sau chỉ cần mở Docker Desktop rồi dùng `docker compose --env-file .env.docker up -d`; không cần deploy lại nếu blockchain và hợp đồng vẫn còn.
+# Xem RAM/CPU từng container
+docker stats --no-stream
 
-## 7. Các lệnh Docker thường dùng
+# Dừng các service (giữ dữ liệu)
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml stop
 
-Xem trạng thái container:
+# Khởi động lại
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml up -d
 
-```bash
-docker compose --env-file .env.docker ps
+# Gỡ container và network (giữ named volumes)
+docker compose --env-file .env.docker -f compose.yaml -f compose.besu.yaml down
 ```
 
-Xem log:
+**TUYỆT ĐỐI không dùng `down -v` khi muốn giữ dữ liệu**: lệnh này có thể xóa volume MySQL và 4 volume Besu. Khi đổi genesis, dữ liệu chain cũ không còn tương thích; cần kế hoạch sao lưu và khởi tạo lại có chủ đích.
 
-```bash
-docker compose --env-file .env.docker logs -f
-```
+## 8. Xử lý lỗi thường gặp
 
-Dừng container:
+| Hiện tượng | Kiểm tra / xử lý |
+|---|---|
+| `DOCKER_DB_ROOT_PASSWORD is missing` | Dùng `--env-file .env.docker`, kiểm tra biến có giá trị |
+| `port 8545 already allocated` | Kiểm tra `docker ps`; dừng Ganache hoặc Besu Windows đang chiếm cổng |
+| `Output directory already exists` khi sinh genesis | Kiểm tra `besu/generated/networkFiles` và làm theo mục 4.2; không chạy lại toàn script |
+| `health: starting` | Chờ 30–60 giây, xem `docker logs --tail 100 besu-node1` |
+| Không tạo block | Kiểm tra 4 node, genesis/khóa và `static-nodes.docker.json`; không tự sinh lại khóa |
+| API trả `404` tại `/` | Bình thường nếu không có route gốc; thử `/docs` |
+| Admin báo cuộc bầu cử thuộc contract cũ | Dữ liệu MySQL cũ đang trỏ contract trước đó; tạo cuộc bầu cử mới, không vội xóa DB |
+| Sửa `.env.docker` nhưng app không nhận | Chạy `up -d --force-recreate` với cả hai Compose file |
+| Frontend không gọi được API trên máy khác | Build arg hiện đang cố định `127.0.0.1:8001`; phải cấu hình lại URL công khai khi deploy Cloud |
 
-```bash
-docker compose --env-file .env.docker stop
-```
+## 9. Bảo mật và chuẩn bị Cloud/CI/CD
 
-Khởi động lại:
+- **Không commit** `.env`, `.env.docker`, `besu/generated/`, `besu/data/`, private key hay dữ liệu blockchain. Kiểm tra `git status --short` và `git ls-files .env .env.docker besu/generated besu/data` trước khi push.
+- `.dockerignore` phải loại trừ `besu/` và các file `.env*` để không đưa khóa vào image Python (`COPY . .`).
+- **Cấu hình hiện tại chỉ dành cho local**: RPC của 4 Besu đang mở cổng trên host, `--rpc-http-cors-origins=*`, `--host-allowlist=*`; khi đưa lên VPS phải hạn chế truy cập bằng firewall, chỉ expose các dịch vụ thực sự cần thiết, dùng HTTPS/reverse proxy.
+- Frontend đang build với `VITE_API_BASE_URL=http://127.0.0.1:8001`. Trên Cloud phải sửa thành API URL công khai (ưu tiên HTTPS) **và build lại frontend**.
+- Không đẩy trực tiếp file khóa lên GitHub Actions; dùng secrets và quy trình cấp phát an toàn. Nếu giữ chain local khi chuyển Cloud, phải lập kế hoạch chuyển khóa/genesis và dữ liệu volume phù hợp; không mặc định sinh lại genesis.
+- **Cloud và CI/CD chưa triển khai**; README này mô tả quy trình chạy local đã kiểm thử.
 
-```bash
-docker compose --env-file .env.docker up -d
-```
+## 10. Trạng thái đồ án
 
-Không sử dụng `docker compose down -v` nếu muốn giữ dữ liệu MySQL **và blockchain Ganache**. Các volume `mysql_data` và `ganache_data` lưu dữ liệu độc lập với vòng đời container.
-
-Kiểm tra hợp đồng còn tồn tại sau khi khởi động lại Ganache:
-
-```bash
-docker compose --env-file .env.docker stop ganache
-docker compose --env-file .env.docker start ganache
-```
-
-Sau đó mở lại Admin để xác nhận kết nối và hợp đồng vẫn hoạt động.
-
-## 8. Tiến độ triển khai
-
-- [x] Docker hóa MySQL
-- [x] Docker hóa Gradio Admin
-- [x] Docker hóa FastAPI
-- [x] Docker hóa React Frontend
-- [x] Kết nối Docker với Ganache Desktop (giai đoạn thử nghiệm ban đầu)
-- [x] Kiểm tra kết nối React → FastAPI
-- [x] Docker hóa Ganache và cấu hình lưu trữ blockchain
-- [x] Kiểm tra hợp đồng vẫn tồn tại sau khi dừng/khởi động lại Ganache
-- [x] Đồng bộ tài khoản Admin với Admin trên Smart Contract
-- [x] Tối ưu Docker build bằng `.dockerignore`
-- [ ] Kiểm thử toàn bộ nghiệp vụ bỏ phiếu
-- [ ] Triển khai hệ thống lên Cloud
-- [ ] Thiết lập CI/CD bằng GitHub Actions
-
-## 9. Ghi chú
-
-- MySQL sử dụng Docker Volume để lưu trữ dữ liệu.
-- Ganache chạy trong Docker tại service `ganache:8545`; Windows truy cập qua `127.0.0.1:8545`.
-- Nếu Ganache bị reset hoặc xóa volume, cần deploy lại Smart Contract và cập nhật `CONTRACT_ADDRESS`.
-- `.dockerignore` loại trừ `.venv`, `node_modules`, file môi trường và tài liệu không cần thiết để giảm build context.
-- Khi thay đổi `ElectionABI.json`, cần build lại image Python để container nhận ABI mới.
-- Cấu hình hiện tại phục vụ mục đích phát triển và kiểm thử đồ án, chưa phải cấu hình production.
-- Máy chạy thử nên có cấu hình từ 16GB RAM trở lên nếu không sẽ đứng máy
+- [x] Docker hóa Frontend, API, Admin và MySQL.
+- [x] Docker hóa mạng Hyperledger Besu QBFT 4 validator.
+- [x] Sinh genesis, validator keys và kết nối các node.
+- [x] Deploy `Election.sol` lên Besu.
+- [x] Kiểm thử tạo block, bỏ phiếu và hiển thị kết quả Admin trên local.
+- [ ] Triển khai Cloud.
+- [ ] Thiết lập GitHub Actions CI/CD.
