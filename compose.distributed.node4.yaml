@@ -1,0 +1,57 @@
+name: besu-distributed
+
+services:
+  besu-node4:
+    image: hyperledger/besu:26.11.0
+    container_name: besu-distributed-node4
+    restart: unless-stopped
+    user: root
+
+    environment:
+      BESU_OPTS: "-Xmx512m"
+
+    command:
+      - --data-path=/opt/besu/data
+      - --genesis-file=/config/genesis.json
+      - --node-private-key-file=/config/node/key
+      - --static-nodes-file=/config/static-nodes.json
+
+      # P2P qua Tailscale
+      - --p2p-enabled=true
+      - --p2p-port=30303
+      - --p2p-host=100.83.127.103
+
+      # JSON-RPC
+      - --rpc-http-enabled
+      - --rpc-http-host=0.0.0.0
+      - --rpc-http-port=8545
+      - --rpc-http-api=ETH,NET,WEB3,QBFT,ADMIN,TXPOOL
+      - --host-allowlist=*
+
+      - --min-gas-price=0
+
+    ports:
+      - "127.0.0.1:8554:8545"
+      - "100.83.127.103:30303:30303/tcp"
+      - "100.83.127.103:30303:30303/udp"
+
+    volumes:
+      - ./besu/distributed/genesis.json:/config/genesis.json:ro
+      - ./besu/distributed/static-nodes.json:/config/static-nodes.json:ro
+      - ./besu/distributed/node4:/config/node:ro
+      - besu-distributed-data-4:/opt/besu/data
+
+    networks:
+      default:
+      app:
+        aliases:
+          - besu-node4
+
+networks:
+  default:
+  app:
+    external: true
+    name: besu-distributed-app-net
+
+volumes:
+  besu-distributed-data-4:

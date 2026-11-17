@@ -16,3 +16,13 @@ dist/
 # Besu (chứa khóa, không commit)
 besu/generated/
 besu/data/
+
+# Distributed blockchain private keys
+/besu/distributed/
+/Node3-Docker/
+/Node3-Docker.zip
+/Node1-Java/
+/Node1-Java.zip
+/Node2-Java/
+/Node2-Java.zip
+/.env.distributed.docker

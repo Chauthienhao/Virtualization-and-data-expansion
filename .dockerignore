@@ -42,3 +42,8 @@ Thumbs.db
 
 # Besu: không đưa khóa và dữ liệu blockchain vào image Python
 besu/
+
+# Bo cai va cau hinh ban giao cho cac may khac
+Node1-Java/
+Node2-Java/
+Node3-Docker/

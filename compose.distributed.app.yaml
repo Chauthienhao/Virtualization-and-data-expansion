@@ -1,0 +1,83 @@
+﻿name: blockchain-distributed-app
+
+services:
+  db:
+    image: mysql:8.4
+    container_name: blockchain_distributed_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DOCKER_DB_ROOT_PASSWORD:?Set DOCKER_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: election_admin
+    volumes:
+      - mysql_distributed_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    image: blockchain-vote-python:distributed
+    container_name: blockchain_distributed_admin
+    restart: unless-stopped
+    env_file:
+      - .env.distributed.docker
+    ports:
+      - "7862:7860"
+    command: python adminUI.py
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app
+      - besu
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    image: blockchain-vote-python:distributed
+    container_name: blockchain_distributed_api
+    restart: unless-stopped
+    env_file:
+      - .env.distributed.docker
+    ports:
+      - "8002:8001"
+    command: python -m uvicorn voter_api:app --host 0.0.0.0 --port 8001
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app
+      - besu
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: http://127.0.0.1:8002
+    image: blockchain-vote-frontend:distributed
+    container_name: blockchain_distributed_frontend
+    restart: unless-stopped
+    ports:
+      - "3002:80"
+    depends_on:
+      - api
+    networks:
+      - app
+
+networks:
+  app:
+  besu:
+    external: true
+    name: besu-distributed-app-net
+
+volumes:
+  mysql_distributed_data:
